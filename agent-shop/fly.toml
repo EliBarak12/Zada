@@ -1,0 +1,47 @@
+# Fly.io config — deploy from this directory (agent-shop/).
+#
+# This app must run as exactly ONE always-on machine: the live SSE mirror and
+# the on-disk state (sizes/loves/bag/prices) live in the process. Two machines
+# would split them (the Vercel problem in miniature), so:
+#   - auto_stop is off and min_machines_running = 1  (never scale to zero)
+#   - deploy with --ha=false                          (never scale to two)
+#
+# First deploy:
+#   fly apps create agent-shop                 # pick another name if taken
+#   fly volumes create zara_data --region fra --size 1
+#   fly deploy --ha=false
+# Then: https://<app-name>.fly.dev  (storefront) and /mcp (agents)
+
+app = "agent-shop"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "4977"
+  ZARA_STORE = "il"
+  ZARA_LANG = "en"
+
+[http_service]
+  internal_port = 4977
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/healthz"
+
+# Persistent state across deploys/restarts — sizes, loves, bag, price history.
+[mounts]
+  source = "zara_data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

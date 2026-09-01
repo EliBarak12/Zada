@@ -1,0 +1,17 @@
+# One-click deploy on Render (a WebMCP Challenge partner):
+# push this repo to a public GitHub repo, then "New → Blueprint" on render.com
+# and point it here. Free tier is enough for the demo.
+services:
+  - type: web
+    name: agent-shop
+    runtime: node
+    rootDir: agent-shop
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server/index.mjs
+    healthCheckPath: /healthz
+    envVars:
+      - key: ZARA_STORE
+        value: il
+      - key: ZARA_LANG
+        value: en

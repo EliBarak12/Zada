@@ -1,0 +1,6 @@
+node_modules/
+data/
+nohup.out
+*.log
+.DS_Store
+demo/

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zada</title>
+  <meta name="description" content="Zada — the store that shops with you. A live fashion storefront where people and AI agents shop together through WebMCP / MCP tools, in one shared session." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🛍️</text></svg>" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand" id="brand" title="Home">ZADA</div>
+    <!-- toolname/tooldescription: WebMCP's declarative form API — browsers that
+         support it expose this form as a page tool with zero JS. -->
+    <form id="searchForm" role="search" aria-label="Search products"
+      toolname="search-the-shop" toolautosubmit
+      tooldescription="Search the live catalog by natural-language query, e.g. men's pants">
+      <input id="searchInput" name="query" type="search" placeholder="SEARCH" autocomplete="off"
+        toolparamdescription="What to look for, e.g. men's linen trousers" />
+      <button type="submit" aria-label="Search">GO</button>
+    </form>
+    <nav class="top-right">
+      <button id="sizeChip" class="tlink" title="Your saved sizes — used by size checks">SIZES <b id="sizeChipVal">none</b></button>
+      <button id="bagChip" class="tlink" title="Your bag — the agent can fill it, checkout stays on the retailer's site">SHOPPING BAG (<b id="bagCount">0</b>)</button>
+      <div id="agentStatus" class="agent-status" data-state="idle" title="Lights up when an AI agent calls a tool">
+        <span class="dot"></span><span id="agentStatusText">agent idle</span>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section id="stage" aria-live="polite">
+      <div id="hero">
+        <h1>THE STORE THAT<br/>SHOPS WITH YOU</h1>
+        <p>Ask your agent: <em>“search for men's pants, tell me what's in my size, check reviews and whether the price dropped.”</em><br />
+        Every step the agent takes renders here, live — and everything stays clickable for you.</p>
+        <div class="hero-badges">
+          <span class="badge" id="webmcpBadge" data-on="false">WebMCP: checking…</span>
+          <span class="badge">Remote MCP: <code id="mcpUrl"></code></span>
+        </div>
+        <div id="rails"></div>
+      </div>
+      <div id="grid" class="grid" hidden></div>
+      <div id="detail" hidden></div>
+    </section>
+  </main>
+
+  <div id="sizeDialogBackdrop" hidden>
+    <div id="sizeDialog" role="dialog" aria-modal="true" aria-label="Your sizes">
+      <h2>YOUR SIZES</h2>
+      <label>Tops <input id="szTops" placeholder="M" /></label>
+      <label>Bottoms <input id="szBottoms" placeholder="32" /></label>
+      <label>Shoes <input id="szShoes" placeholder="43" /></label>
+      <div class="dialog-actions">
+        <button id="szCancel">CANCEL</button>
+        <button id="szSave" class="primary">SAVE</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

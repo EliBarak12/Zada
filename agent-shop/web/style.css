@@ -1,0 +1,253 @@
+/* Zada — Zara-school editorial minimalism: white ground, near-black ink,
+   tiny tracked uppercase sans, a Didot wordmark, flush image grids,
+   no rounded corners, no chrome. */
+
+:root {
+  --ink: #111;
+  --paper: #fff;
+  --muted: #767676;
+  --hairline: #e6e6e6;
+  --accent: #0a5c36;      /* in-stock green */
+  --warn: #b04a00;        /* low stock */
+  --sale: #e10600;
+  --agent: #2445ff;       /* agent-action blue */
+  --serif: 'Didot', 'Bodoni MT', 'Playfair Display', Georgia, serif;
+  --sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  font-family: var(--sans);
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  display: flex;
+  flex-direction: column;
+}
+
+button { font: inherit; letter-spacing: inherit; background: none; border: none; cursor: pointer; color: inherit; }
+a { color: inherit; }
+code { font-size: 10px; background: #f4f4f4; padding: 1px 4px; }
+
+/* ---------------------------------------------------------------- header */
+#topbar {
+  display: flex; align-items: baseline; gap: 34px;
+  padding: 26px 40px 18px;
+  position: sticky; top: 0; background: var(--paper); z-index: 30;
+}
+.brand {
+  font-family: var(--serif); font-size: 44px; font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1; cursor: pointer; white-space: nowrap;
+  transform: scaleY(1.08);
+}
+
+#searchForm { margin-left: auto; display: flex; width: 220px; border-bottom: 1px solid var(--ink); }
+#searchForm input {
+  flex: 1; border: none; outline: none; font: inherit; padding: 6px 0;
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+}
+#searchForm input::placeholder { color: var(--ink); }
+#searchForm button { padding: 6px 0 6px 8px; font-size: 9px; letter-spacing: 0.24em; color: var(--muted); }
+#searchForm button:hover { color: var(--ink); }
+
+.top-right { display: flex; align-items: baseline; gap: 26px; }
+.tlink { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap; }
+.tlink:hover { text-decoration: underline; text-underline-offset: 3px; }
+.tlink b { font-weight: 400; }
+
+.agent-status { display: flex; align-items: center; gap: 7px; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+.agent-status .dot { width: 7px; height: 7px; border-radius: 50%; background: #cfcfcf; transition: background .3s; }
+.agent-status[data-state="active"] { color: var(--agent); }
+.agent-status[data-state="active"] .dot { background: var(--agent); box-shadow: 0 0 0 4px rgba(36,69,255,.14); animation: pulse 1.2s infinite; }
+.agent-status[data-state="recent"] .dot { background: var(--agent); }
+.agent-status[data-state="recent"] { color: var(--ink); }
+@keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(36,69,255,.05); } }
+
+/* ------------------------------------------------------------------ layout */
+main { flex: 1; display: flex; min-height: 0; }
+#stage { flex: 1; overflow-x: hidden; padding: 0 0 90px; }
+
+/* ------------------------------------------------------------------- hero */
+#hero { padding: 84px 40px 60px; max-width: 1100px; }
+#hero h1 { font-family: var(--serif); font-size: clamp(40px, 6.4vw, 84px); font-weight: 500; letter-spacing: 0.01em; line-height: 1.02; margin-bottom: 30px; }
+#hero p { font-size: 12px; line-height: 1.9; color: #333; max-width: 540px; letter-spacing: 0.04em; }
+#hero em { font-style: italic; }
+.hero-badges { margin-top: 30px; display: flex; gap: 22px; flex-wrap: wrap; }
+.badge { font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.badge[data-on="true"] { color: var(--accent); }
+
+/* ------------------------------------------------------------------- grid */
+.grid-head { padding: 30px 40px 14px; display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+.grid-head h2 { font-size: 12px; font-weight: 400; letter-spacing: 0.22em; text-transform: uppercase; }
+.grid-head .meta { color: var(--muted); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
+.grid-head .chip { margin-left: auto; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; border: 1px solid var(--ink); padding: 7px 12px; }
+.grid-head .chip:hover { background: var(--ink); color: var(--paper); }
+.grid-head .chip.on { background: var(--ink); color: var(--paper); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 2px; background: var(--paper); }
+.card { background: var(--paper); cursor: pointer; position: relative; }
+.card:hover .ph img { transform: scale(1.015); }
+.card .ph { aspect-ratio: 2/3; overflow: hidden; background: #f6f6f6; position: relative; }
+.card .ph img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s ease; }
+.card .info { padding: 9px 10px 22px; }
+.card .name { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; line-height: 1.5; min-height: 30px; }
+.card .price { margin-top: 3px; font-size: 10.5px; letter-spacing: 0.04em; }
+.card .price .old { text-decoration: line-through; color: var(--muted); margin-right: 7px; }
+.card .price .now.sale { color: var(--sale); }
+.sale-flag { position: absolute; top: 0; left: 0; background: var(--paper); color: var(--sale); font-size: 9px; letter-spacing: 0.12em; padding: 5px 8px; }
+.size-flag { position: absolute; bottom: 10px; right: 10px; background: var(--paper); color: var(--accent); border: 1px solid var(--accent); font-size: 8px; letter-spacing: 0.14em; padding: 3px 7px; z-index: 2; }
+.card .swatches { display: flex; gap: 4px; margin-top: 6px; }
+.card .swatches i { width: 9px; height: 9px; border: 1px solid var(--hairline); display: inline-block; }
+
+.agent-flash { animation: agentFlash 1.6s ease; }
+@keyframes agentFlash { 0% { outline: 2px solid var(--agent); outline-offset: -2px; } 100% { outline: 2px solid transparent; } }
+
+/* ----------------------------------------------------------------- detail */
+#detail { padding: 0; }
+.detail-top { display: flex; gap: 0; flex-wrap: wrap; }
+.gallery { flex: 1.2; min-width: 360px; display: grid; grid-template-columns: 1fr; gap: 2px; }
+.gallery img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; background: #f6f6f6; }
+.detail-info { flex: 1; min-width: 330px; padding: 54px 56px; position: sticky; top: 96px; align-self: flex-start; }
+.detail-info .back { font-size: 9px; letter-spacing: 0.24em; color: var(--muted); margin-bottom: 34px; display: inline-block; }
+.detail-info .back:hover { color: var(--ink); }
+.detail-info h2 { font-size: 15px; font-weight: 400; letter-spacing: 0.1em; line-height: 1.4; text-transform: uppercase; }
+.detail-info .ref { color: var(--muted); font-size: 9px; letter-spacing: 0.14em; margin-top: 8px; text-transform: uppercase; }
+.detail-info .price { font-size: 13px; margin: 20px 0 4px; letter-spacing: 0.06em; }
+.detail-info .price .old { text-decoration: line-through; color: var(--muted); margin-right: 10px; font-size: 11px; }
+.detail-info .price .now.sale { color: var(--sale); }
+.discount-note { color: var(--sale); font-size: 10px; letter-spacing: 0.12em; }
+.detail-info .desc { margin: 24px 0; font-size: 11.5px; line-height: 1.85; color: #333; max-width: 400px; letter-spacing: 0.03em; }
+
+.block-label { font-size: 9px; letter-spacing: 0.26em; color: var(--muted); margin: 28px 0 12px; text-transform: uppercase; }
+.colors { display: flex; gap: 8px; flex-wrap: wrap; }
+.colors .cbtn { display: flex; align-items: center; gap: 7px; border: 1px solid var(--hairline); padding: 6px 10px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+.colors .cbtn.on { border-color: var(--ink); }
+.colors .cbtn i { width: 11px; height: 11px; border: 1px solid var(--hairline); }
+
+.sizes { display: flex; gap: 6px; flex-wrap: wrap; }
+.size {
+  min-width: 48px; padding: 11px 8px; text-align: center;
+  border: 1px solid var(--hairline); font-size: 11px; letter-spacing: 0.06em; position: relative;
+}
+.size[data-a="in_stock"] { border-color: var(--ink); }
+.size[data-a="low_on_stock"] { border-color: var(--warn); color: var(--warn); }
+.size[data-a="out_of_stock"], .size[data-a="coming_soon"] { color: #c4c4c4; text-decoration: line-through; }
+.size.yours { outline: 2px solid var(--accent); outline-offset: -1px; }
+.size.yours::after { content: 'YOURS'; position: absolute; top: -7px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #fff; font-size: 7px; letter-spacing: 0.12em; padding: 1px 4px; }
+.size-legend { margin-top: 12px; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.size.selectable { cursor: pointer; }
+.size.selected { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+.addbag { display: block; width: 100%; max-width: 400px; margin-top: 26px; background: var(--ink); color: var(--paper); border: 1px solid var(--ink); padding: 15px 30px; font-size: 10px; letter-spacing: 0.3em; text-align: center; }
+.addbag:hover { background: var(--paper); color: var(--ink); }
+.addbag[disabled] { opacity: .4; pointer-events: none; }
+
+.zara-link { display: block; width: 100%; max-width: 400px; margin-top: 10px; border: 1px solid var(--ink); padding: 14px 26px; font-size: 10px; letter-spacing: 0.3em; text-decoration: none; text-align: center; }
+.zara-link:hover { background: var(--ink); color: var(--paper); }
+
+/* review + price panels */
+.panels { display: flex; flex-wrap: wrap; gap: 1px; background: var(--hairline); border-top: 1px solid var(--hairline); margin-top: 60px; }
+.panel { background: var(--paper); flex: 1; min-width: 330px; padding: 40px; }
+.panel h3 { font-size: 11px; letter-spacing: 0.24em; font-weight: 400; margin-bottom: 8px; text-transform: uppercase; }
+.panel .subtitle { color: var(--muted); font-size: 10.5px; line-height: 1.6; margin-bottom: 18px; }
+.review { border-top: 1px solid var(--hairline); padding: 12px 0; }
+.review .src { font-size: 8px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--agent); }
+.review a { font-size: 12px; text-decoration: none; display: block; margin: 3px 0; }
+.review a:hover { text-decoration: underline; }
+.review .snip { color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+.price-verdict { font-size: 13px; line-height: 1.6; border-left: 2px solid var(--ink); padding-left: 14px; margin-bottom: 18px; }
+.price-verdict.good { border-color: var(--accent); color: var(--accent); }
+.sparkline { width: 100%; height: 60px; margin-top: 8px; }
+.price-stats { display: flex; gap: 26px; margin-top: 14px; }
+.price-stats div b { display: block; font-size: 14px; font-weight: 400; }
+.price-stats div span { font-size: 8px; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; }
+
+/* --------------------------------------------- event-driven navigation */
+#rails { margin-top: 54px; }
+.rail { margin-bottom: 34px; }
+.rail-title { font-size: 9px; letter-spacing: 0.26em; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; }
+.rail-title span { letter-spacing: 0.08em; text-transform: none; color: #a9a9a9; margin-left: 8px; }
+.rail-row { display: flex; gap: 2px; overflow-x: auto; padding-bottom: 6px; }
+.mini { min-width: 132px; width: 132px; cursor: pointer; }
+.mini img { width: 100%; aspect-ratio: 2/3; object-fit: cover; background: #f6f6f6; display: block; }
+.mini:hover img { opacity: .88; }
+.mini-name { font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; margin-top: 6px; line-height: 1.4; height: 26px; overflow: hidden; }
+.mini-price { font-size: 10px; margin-top: 2px; }
+.similar-row { padding: 34px 40px 6px; border-top: 1px solid var(--hairline); }
+
+.seen-flag { position: absolute; bottom: 10px; left: 10px; background: rgba(255,255,255,.92); color: var(--muted); font-size: 8px; letter-spacing: 0.18em; padding: 3px 6px; z-index: 2; }
+
+.nudge {
+  position: fixed; top: 96px; left: 50%; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 14px;
+  background: var(--ink); color: var(--paper);
+  padding: 13px 20px; font-size: 11px; letter-spacing: 0.05em;
+  box-shadow: 0 6px 28px rgba(0,0,0,.28); animation: slideIn .3s ease;
+  max-width: min(720px, 92vw);
+}
+@keyframes slideIn { from { opacity: 0; transform: translate(-50%, -4px); } }
+.nudge b { text-transform: uppercase; letter-spacing: 0.1em; }
+.nudge-go { border: 1px solid var(--paper); padding: 7px 12px; font-size: 9px; letter-spacing: 0.22em; color: var(--paper); white-space: nowrap; }
+.nudge-go:hover { background: var(--paper); color: var(--ink); }
+.nudge-x { color: #999; font-size: 12px; }
+
+/* -------------------------------------------------------------------- bag */
+.bag-wrap { padding: 44px 40px; max-width: 980px; }
+.bag-wrap h2 { font-size: 15px; font-weight: 400; letter-spacing: 0.22em; text-transform: uppercase; margin-bottom: 6px; }
+.bag-sub { color: var(--muted); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 28px; }
+.bag-item { display: flex; gap: 18px; border-top: 1px solid var(--hairline); padding: 18px 0; align-items: center; }
+.bag-item img { width: 84px; aspect-ratio: 2/3; object-fit: cover; background: #f6f6f6; cursor: pointer; }
+.bag-item .bi-main { flex: 1; }
+.bag-item .bi-name { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.bag-item .bi-meta { color: var(--muted); font-size: 10.5px; margin-top: 4px; letter-spacing: 0.06em; }
+.bag-item .bi-flags { margin-top: 6px; font-size: 9px; letter-spacing: 0.12em; }
+.bag-item .drop { color: var(--accent); }
+.bag-item .oos { color: var(--sale); }
+.bag-item .bi-price { text-align: right; font-size: 12px; min-width: 90px; }
+.bag-item .bi-price .was { text-decoration: line-through; color: var(--muted); font-size: 10.5px; display: block; }
+.bag-item .bi-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.bag-item .rm { font-size: 8px; letter-spacing: 0.2em; color: var(--muted); text-decoration: underline; }
+.bag-item .rm:hover { color: var(--sale); }
+.bag-item .zlink { font-size: 8px; letter-spacing: 0.16em; border: 1px solid var(--hairline); padding: 6px 10px; text-decoration: none; }
+.bag-item .zlink:hover { border-color: var(--ink); }
+.bag-total { display: flex; justify-content: space-between; border-top: 1px solid var(--ink); padding: 18px 0; font-size: 13px; letter-spacing: 0.1em; }
+.bag-note { color: var(--muted); font-size: 10.5px; line-height: 1.7; margin-top: 8px; }
+.bag-empty { border-top: 1px solid var(--hairline); padding: 40px 0; color: var(--muted); font-size: 11px; letter-spacing: 0.06em; }
+.bag-wrap .back { font-size: 9px; letter-spacing: 0.24em; color: var(--muted); margin-bottom: 26px; display: inline-block; }
+.bag-wrap .back:hover { color: var(--ink); }
+
+.love {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  width: 30px; height: 30px;
+  background: transparent; border: none;
+  font-size: 16px; line-height: 1; color: var(--ink); transition: color .15s, transform .15s;
+}
+.card .love { position: absolute; }
+.card .ph { position: relative; }
+.love:hover { color: var(--sale); transform: scale(1.12); }
+.love.on { color: var(--sale); }
+.love-detail { position: static; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-left: 10px; }
+
+/* ----------------------------------------------------------------- dialog */
+#sizeDialogBackdrop { position: fixed; inset: 0; background: rgba(17,17,17,.45); display: flex; align-items: center; justify-content: center; z-index: 90; }
+#sizeDialog { background: var(--paper); padding: 38px 42px; width: 340px; }
+#sizeDialog h2 { font-size: 13px; letter-spacing: 0.24em; font-weight: 400; margin-bottom: 24px; }
+#sizeDialog label { display: flex; justify-content: space-between; align-items: center; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 14px; }
+#sizeDialog input { width: 120px; border: none; border-bottom: 1px solid var(--ink); padding: 6px 2px; font: inherit; text-align: center; outline: none; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
+.dialog-actions button { padding: 10px 18px; font-size: 9px; letter-spacing: 0.24em; border: 1px solid var(--hairline); }
+.dialog-actions .primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* --------------------------------------------------------------- responsive */
+@media (max-width: 860px) {
+  #topbar { flex-wrap: wrap; gap: 14px; padding: 18px 20px 12px; }
+  .brand { font-size: 34px; }
+  #searchForm { order: 3; width: 100%; margin-left: 0; }
+  #hero { padding: 50px 20px 40px; }
+  .grid-head, .similar-row { padding-left: 20px; padding-right: 20px; }
+  .bag-wrap { padding: 30px 20px; }
+  .detail-info { position: static; padding: 30px 20px; }
+}

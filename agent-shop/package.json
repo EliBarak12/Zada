@@ -1,0 +1,26 @@
+{
+  "name": "zada",
+  "version": "0.1.0",
+  "description": "Zada — the store that shops with you: a WebMCP storefront + remote MCP server over a live fashion catalog, shared by humans and AI agents in one session",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node test/e2e-mcp.mjs && node test/e2e-web.mjs",
+    "start": "node server/index.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}
