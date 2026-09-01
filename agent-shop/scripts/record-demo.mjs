@@ -1,11 +1,12 @@
-// Records the full demo video of the event-driven shopping experience:
-// the HUMAN browses with real clicks (cards, hearts, "more like this"),
-// their events reshape the shop live (nudge card, home-page rails), and the
-// agent appears as an amplifier at the end — reading the signals and filling
-// the bag. Runs against the live catalog.
+// Records the full Zada tour: the HUMAN browses with real clicks (cards,
+// hearts, "more like this"), their events reshape the shop live (nudge card,
+// home-page rails), and the agent works alongside — size checks, reviews and
+// price intelligence on the open product, reading where the human is and how
+// they got there, and finally filling the bag. Runs against the live catalog.
 //
 //   PW_CHROMIUM=/path/to/chromium node scripts/record-demo.mjs
-//   → demo/zada-demo.webm
+//   → demo/zada-demo.webm + demo/timeline.json (caption timings, used by
+//     scripts/narrate-demo.mjs to voice the captions)
 
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -37,6 +38,8 @@ const context = await browser.newContext({
   ignoreHTTPSErrors: true,
 });
 const page = await context.newPage();
+const T0 = Date.now(); // the video starts with the page
+const timeline = [];
 
 await page.addInitScript(() => {
   const tools = new Map();
@@ -59,7 +62,11 @@ const call = (name, args) =>
     return JSON.parse(r.content[0].text);
   }, { name, args });
 
+// Hold each caption at least as long as it takes to say it (~0.3s/word).
+const speechMs = (text) => text.trim().split(/\s+/).length * 320 + 1100;
+
 async function caption(who, text, holdMs = 2600) {
+  timeline.push({ who, text, at: Date.now() - T0 });
   await page.evaluate(({ who, text }) => {
     let bar = document.getElementById('__cap');
     if (!bar) {
@@ -72,12 +79,12 @@ async function caption(who, text, holdMs = 2600) {
         'transition:opacity .3s;text-align:center;pointer-events:none';
       document.body.appendChild(bar);
     }
-    const label = who === 'you' ? 'YOU' : who === 'shop' ? 'THE SHOP' : 'AGENT';
+    const label = who === 'you' ? 'YOU' : who === 'shop' ? 'ZADA' : 'AGENT';
     const color = who === 'you' ? '#9be29b' : who === 'shop' ? '#7fd7a8' : '#8fa8ff';
     bar.innerHTML = `<span style="font-size:10px;letter-spacing:.3em;color:${color}">${label}</span><br>${text}`;
     bar.style.opacity = '1';
   }, { who, text });
-  await sleep(holdMs);
+  await sleep(Math.max(holdMs, speechMs(text)));
 }
 
 async function humanClick(selector) {
@@ -110,99 +117,128 @@ async function waitImages(sel, ms = 8000) {
     return imgs.length && imgs.every((i) => i.complete && i.naturalWidth > 0);
   }, sel, { timeout: ms }).catch(() => {});
 }
+const openProductId = () => page.evaluate(() => state.detail?.id ?? null);
+const scrollTo = (sel, block = 'center') => page.evaluate(({ sel, block }) => document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block }), { sel, block });
 
 try {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__webmcp?.registered?.length > 0, null, { timeout: 15000 });
-  await sleep(1200);
+  await sleep(1000);
+
+  // ——— Scene 0: what this is ———
+  await caption('shop', 'This is Zada — the store that shops with you. A live fashion storefront where you and your AI agent shop together, in one shared session.');
+  await caption('shop', 'On load, the page registers fourteen tools with the browser through WebMCP. Outside the tab, the same tools are served over remote MCP — and every call renders right here, in the store.');
 
   // ——— Scene 1: setup ———
-  await caption('you', '“I wear M, waist 32, shoe 43 — now let me just shop. Watch what the store learns.”', 3200);
+  await caption('you', 'I wear M, waist 32, shoe 43 — now let me just shop. Watch what the store learns.');
   await call('set_my_sizes', { tops: 'M', bottoms: '32', shoes: '43' });
 
-  await caption('you', '“Search: men’s pants.”', 1800);
+  await caption('you', 'Search: men’s pants.', 1800);
   await humanClick('#searchInput');
   await page.fill('#searchInput', "men's pants");
   await page.click('#searchForm button');
   await page.waitForSelector('#grid .card', { timeout: 15000 });
   await waitImages('#grid .card img');
-  await sleep(1200);
+  await sleep(1000);
 
   // ——— Scene 2: human browsing — every move is an event ———
-  await caption('shop', 'Every view, every second you linger, every ♥ becomes an event the store can use.', 3000);
+  await caption('shop', 'Every view, every second you linger, every heart becomes an event the store can use.');
   await humanClick('#grid .card:nth-of-type(2)');
   await page.waitForSelector('#detail .detail-info h2', { timeout: 10000 });
   await waitImages('#detail .gallery img');
-  await sleep(2000);
+  await sleep(1600);
   await humanClick('.love-detail');
   await sleep(900);
   await hideCursor();
 
-  // "More like this" grows in from the event — lateral navigation, no search.
   await page.waitForSelector('.similar-row .mini', { timeout: 20000 });
-  await page.evaluate(() => document.querySelector('.similar-row')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-  await caption('shop', 'The product page grows a “More like this” row — tap to drift sideways through the catalog.', 3200);
+  await scrollTo('.similar-row');
+  await caption('shop', 'The product page grows a “More like this” row — tap to drift sideways through the catalog.');
   await humanClick('.similar-row .mini:nth-of-type(1)');
   await page.waitForSelector('#detail .detail-info h2', { timeout: 10000 });
   await waitImages('#detail .gallery img');
-  await sleep(2200);
+  await page.waitForSelector('.similar-row .mini', { timeout: 15000 }).catch(() => {}); // settles the re-render
+  await sleep(1200);
   await humanClick('.love-detail');
   await sleep(800);
-  await page.waitForSelector('.similar-row .mini', { timeout: 20000 }).catch(() => {});
-  await humanClick('.similar-row .mini:nth-of-type(2)').catch(() => {});
-  await page.waitForSelector('#detail .detail-info h2', { timeout: 10000 });
-  await sleep(1800);
   await hideCursor();
 
-  // ——— Scene 3: the shop nudges — events talking back ———
-  const nudged = await page.waitForSelector('#__nudge', { timeout: 12000 }).then(() => true).catch(() => false);
+  // ——— Scene 3: the agent works the open product ———
+  const pid = await openProductId();
+  await caption('you', 'Agent — do they have this in my size?');
+  const size = await call('check_size_availability', { product_id: pid });
+  await scrollTo('.sizes');
+  const sizeName = size.matched ?? size.checked ?? 'your size';
+  await caption('agent', size.inStockAnywhere
+    ? `Yes — ${sizeName} is in stock right now. That’s your size; I’ve flagged it on the size chips.`
+    : `Not in your size at the moment — I checked ${sizeName}. Want similar pieces that are?`);
+
+  await caption('you', 'What do people say about it — and was it cheaper before?');
+  const reviews = await call('find_reviews', { product_id: pid }).catch(() => ({}));
+  const price = await call('check_price', { product_id: pid }).catch(() => ({}));
+  await page.waitForSelector('.panels', { timeout: 10000 }).catch(() => {});
+  await scrollTo('.panels', 'start');
+  const n = (reviews.results ?? []).length;
+  const verdict = price.verdict ?? price.report?.verdict ?? '';
+  await caption('agent', `${n ? `I found ${n} mentions across Reddit, YouTube and the web — they’re in the reviews panel.` : 'The retailer has no on-site reviews, so I pulled live search links into the panel.'} ${verdict ? `On price: ${verdict}` : 'The price panel shows the live markdown and the history the shop tracks.'}`);
+  await hideCursor();
+
+  // ——— Scene 4: the shop nudges — events talking back ———
+  const nudged = await page.waitForSelector('#__nudge', { timeout: 6000 }).then(() => true).catch(() => false);
   if (nudged) {
-    await caption('shop', 'Three items around one theme — so the store itself offers the shortcut. Dismissible, never a takeover.', 3600);
+    await scrollTo('#topbar', 'start');
+    await caption('shop', 'Three items around one theme — so the store itself offers the shortcut. Dismissible, never a takeover.');
     await humanClick('.nudge-go');
-    // A search-mode nudge opens a grid; a similar-mode nudge lands on the
-    // anchor product with a fresh "more like this" row.
     const gridShown = await page.waitForSelector('#grid:not([hidden]) .card', { timeout: 15000 }).then(() => true).catch(() => false);
     if (gridShown) {
       await waitImages('#grid .card img');
-      await caption('shop', 'One tap: the whole theme, together. Notice the SEEN badges — the grid remembers with you.', 3400);
+      await caption('shop', 'One tap: the whole theme, together. Notice the SEEN badges — the grid remembers with you.');
     } else {
       await page.waitForSelector('.similar-row .mini', { timeout: 15000 }).catch(() => {});
       await waitImages('.similar-row .mini img');
-      await caption('shop', 'One tap: similar pieces in your size, right where you are — the store drifts with your taste.', 3400);
+      await caption('shop', 'One tap: similar pieces in your size, right where you are — the store drifts with your taste.');
     }
   }
   await hideCursor();
 
-  // ——— Scene 4: the home page rebuilt from your events ———
+  // ——— Scene 5: the home page rebuilt from your events ———
   await humanClick('.brand');
   await page.waitForSelector('#rails .rail', { timeout: 20000 });
-  await page.evaluate(() => document.querySelector('#rails')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  await sleep(1000);
-  await caption('shop', 'Home is no longer generic: Continue where you left off · Your loves · Picked for you — built only from your events.', 4200);
-  const hasForYou = await page.locator('#rails .rail').count();
-  if (hasForYou >= 2) {
+  await scrollTo('#rails', 'start');
+  await sleep(800);
+  await caption('shop', 'Home is no longer generic: Continue where you left off · Your loves · Picked for you — built only from your events.');
+  const railCount = await page.locator('#rails .rail').count();
+  if (railCount >= 2) {
     await humanClick('#rails .rail:last-of-type .mini:nth-of-type(1)');
     const opened = await page.waitForSelector('#detail:not([hidden]) .detail-info h2', { timeout: 12000 }).then(() => true).catch(() => false);
     if (opened) {
       await waitImages('#detail .gallery img');
-      await caption('shop', 'Picked for you → straight into the product, size chips and all.', 3000);
+      await caption('shop', 'Picked for you → straight into the product, size chips and all.', 2600);
     }
   }
   await hideCursor();
 
-  // ——— Scene 5: the agent as amplifier ———
-  await caption('you', '“Agent — you saw all of that. What’s my pattern, and what should I actually buy?”', 3200);
+  // ——— Scene 6: the agent knows where you are ———
+  await caption('you', 'Agent — where am I right now, and what have I been doing?');
   const sig = await call('get_shopper_signals', {});
-  const themes = sig.taste.themes.slice(0, 3).map((t) => t.word.toLowerCase());
-  await caption('agent', `You loved ${sig.loved.length} items and kept lingering on ${themes.join(', ')}. Your two loves are the strongest — want them in your size?`, 4000);
+  const cur = sig.current ?? {};
+  const where = cur.view === 'product' ? `on ${cur.name}` : cur.view === 'grid' ? `looking at results for ${cur.query}` : cur.view === 'bag' ? 'in your bag' : cur.view === 'similar' ? 'exploring similar items' : 'on the home page';
+  const trail = (sig.journey ?? []).slice(-3).map((s) => `${s.action}${s.name ? ` ${s.name.toLowerCase()}` : s.query ? ` for ${s.query}` : ''}`).join(', then ');
+  await caption('agent', `You’re ${where}, for about ${cur.sinceSeconds ?? 0} seconds. Your trail: ${trail}. I can see the page you’re on and the road that led here — not just what you searched.`);
 
-  await caption('you', '“Yes — bag both, my size.”', 2200);
-  for (const l of sig.loved.slice(0, 2)) await call('add_to_cart', { product_id: l.productId });
+  // ——— Scene 7: the agent as amplifier ———
+  await caption('you', 'So what’s my pattern — and what should I actually buy?');
+  const themes = (sig.taste?.themes ?? []).slice(0, 3).map((t) => t.word.toLowerCase());
+  const lovedCount = (sig.loved ?? []).length;
+  await caption('agent', `You loved ${lovedCount} item${lovedCount === 1 ? '' : 's'} and kept lingering on ${themes.join(', ')}. ${lovedCount === 1 ? 'That love is the strongest signal — want it in your size?' : 'Your loves are the strongest signal — want them in your size?'}`);
+
+  await caption('you', lovedCount === 1 ? 'Yes — bag it, my size.' : 'Yes — bag both, my size.', 2200);
+  for (const l of (sig.loved ?? []).slice(0, 2)) await call('add_to_cart', { product_id: l.productId }).catch(() => {});
   await call('view_cart', {});
   await waitImages('.bag-item img');
-  await caption('agent', 'Done — sizes converted and stock verified. Checkout stays with you: every line links to the retailer.', 3800);
+  await caption('agent', 'Done — sizes converted and stock verified. Checkout stays with you: every line links to the retailer.');
 
-  await caption('shop', 'Zada — the store that shops with you: your events shape it; your agent amplifies them. WebMCP in-page + remote MCP at /mcp.', 4200);
+  await caption('shop', 'Zada — your events shape the store; your agent amplifies them. WebMCP in the page, remote MCP for every agent outside it. Open source.');
 } catch (err) {
   console.error('demo error:', err);
 } finally {
@@ -211,7 +247,8 @@ try {
   server.kill();
 }
 
+fs.writeFileSync(path.join(OUT_DIR, 'timeline.json'), JSON.stringify(timeline, null, 1));
 const raw = fs.readdirSync(OUT_DIR).find((f) => f.endsWith('.webm') && !f.startsWith('zada-'));
 const final = path.join(OUT_DIR, 'zada-demo.webm');
 if (raw) fs.renameSync(path.join(OUT_DIR, raw), final);
-console.log('video:', final, fs.existsSync(final) ? `${(fs.statSync(final).size / 1e6).toFixed(1)}MB` : 'MISSING');
+console.log('video:', final, fs.existsSync(final) ? `${(fs.statSync(final).size / 1e6).toFixed(1)}MB` : 'MISSING', `· ${timeline.length} captions`);
