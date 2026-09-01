@@ -41,16 +41,27 @@ const clips = timeline.map((c, i) => {
   return { ...c, wav, dur: probe(wav) };
 });
 
-// Fit each line into its slot (until the next caption appears): speed up a
-// little if it would run over, never slow down.
+// Build the narration as one concatenated track: silence gaps + voiced
+// lines, each line fitted into its slot (until the next caption appears):
+// sped up a little if it would run over, never slowed down.
+const FMT = 'aformat=sample_fmts=s16:sample_rates=22050:channel_layouts=mono';
 const filters = [];
+const order = [];
+let cursor = 0; // seconds
+let gaps = 0;
+const gap = (dur) => { filters.push(`aevalsrc=0:d=${dur.toFixed(3)}:s=22050:c=mono,${FMT}[g${gaps}]`); order.push(`[g${gaps++}]`); };
 clips.forEach((c, i) => {
-  const slotEnd = clips[i + 1]?.at ?? videoDur * 1000;
-  const slot = Math.max(1, (slotEnd - c.at) / 1000 - 0.25);
+  const start = c.at / 1000;
+  const slotEnd = (clips[i + 1]?.at ?? videoDur * 1000) / 1000;
+  const slot = Math.max(1, slotEnd - start - 0.25);
   const tempo = Math.min(1.35, Math.max(1, c.dur / slot));
-  filters.push(`[${i + 1}:a]atempo=${tempo.toFixed(3)},adelay=${c.at}|${c.at}[a${i}]`);
+  if (start - cursor > 0.01) gap(start - cursor);
+  filters.push(`[${i + 1}:a]atempo=${tempo.toFixed(3)},${FMT}[c${i}]`);
+  order.push(`[c${i}]`);
+  cursor = Math.max(start, cursor) + c.dur / tempo;
 });
-filters.push(`${clips.map((_, i) => `[a${i}]`).join('')}amix=inputs=${clips.length}:normalize=0:dropout_transition=0,apad[mix]`);
+if (videoDur - cursor > 0.01) gap(videoDur - cursor);
+filters.push(`${order.join('')}concat=n=${order.length}:v=0:a=1[mix]`);
 
 const out = path.join(DIR, 'zada-demo-narrated.mp4');
 execFileSync('ffmpeg', [
@@ -58,7 +69,7 @@ execFileSync('ffmpeg', [
   '-filter_complex', filters.join(';'),
   '-map', '0:v', '-map', '[mix]',
   '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', 'scale=1280:-2',
-  '-c:a', 'aac', '-b:a', '128k', '-shortest', '-movflags', '+faststart', out,
+  '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', out,
 ], { stdio: ['ignore', 'ignore', 'inherit'] });
 for (const c of clips) fs.rmSync(c.wav, { force: true });
 console.log('narrated:', out, `${(fs.statSync(out).size / 1e6).toFixed(1)}MB · ${clips.length} lines · video ${videoDur.toFixed(1)}s`);
