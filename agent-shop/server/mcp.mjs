@@ -27,7 +27,11 @@ export function buildMcpServer() {
       'Agentic shopping over a live fashion catalog. Typical flow: search_products → get_product / check_size_availability → find_reviews / check_price. ' +
       'Every call is mirrored live in the human’s shop UI — after acting, briefly tell the human what appeared on screen. ' +
       'Save their sizes once with set_my_sizes; afterwards size checks use the profile automatically. ' +
-      'For reviews: call find_reviews, then — if you have your own native web-search tool — immediately run its suggestedQueries with it too (the human already asked; never ask permission) and synthesize everything into one verdict on fit, quality and sizing.' },
+      'For reviews: call find_reviews, then — if you have your own native web-search tool — immediately run its suggestedQueries with it too (the human already asked; never ask permission) and synthesize everything into one verdict on fit, quality and sizing — then write that verdict onto the product page with post_findings. ' +
+      'The human decides by tapping in the store, not by typing: after search results, a product view, a size check or the bag, offer the next step with ask_shopper (2-5 short choices) — results include a ready-made nextStep suggestion. Never ask in chat what you can ask in the store. ' +
+      'Every tool result carries `shopper`: where the human is on screen right now, what they did since your last call, and their saved sizes — acknowledge it and build on it; get_shopper_signals is the long form (journey, loves, dwell, taste, answers). ' +
+      'Catalog is in English (translate the human’s words before searching; reply in their language); prices in ILS (₪); men’s trousers are EU 36-50 or S-XL and the store converts US waists. ' +
+      'Lookups (size, price, reviews, verdicts) on a product the human is NOT looking at stay quiet and say humanSees / onScreen:false; only get_product, search_products, find_similar and view_cart change the screen.' },
   );
   for (const t of TOOLS) {
     server.registerTool(

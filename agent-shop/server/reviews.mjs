@@ -15,6 +15,9 @@ const decode = (s) =>
     .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
     .trim();
 
+const JUNK_HOSTS = /(merriam-webster|dictionary\.com|cambridge\.org|vocabulary\.com|thesaurus|wikipedia|wiktionary|imdb\.com|sourceforge|britannica|collinsdictionary|urbandictionary|nordstrom\.com|lulus\.com|prettylittlething)/i;
+const NAME_STOP = new Set(['with', 'and', 'the', 'basic', 'side', 'comfort', 'regular', 'slim', 'relaxed', 'wide', 'fit', 'new', 'collection', 'limited', 'edition', 'textured', 'waist']);
+
 async function bingRss(query) {
   const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss&count=10`;
   const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15_000) });
@@ -97,7 +100,7 @@ export async function findReviews(productName, { extraTerms = '' } = {}) {
   // Query shapes tuned per source: Reddit surfaces opinion threads best WITHOUT
   // the word "review"; YouTube responds to "try on haul"; Bing wants it all.
   const attempts = await Promise.allSettled([
-    bingRss(`${name} zara review reddit`),
+    bingRss(`"${name}" zara review`),
     youtube(`zara ${name} try on haul review`),
     redditRss(`zara ${name}`),
   ]);
@@ -114,8 +117,22 @@ export async function findReviews(productName, { extraTerms = '' } = {}) {
     }
   });
   // Reviews-first ordering: discussion threads and try-on videos beat generic web hits.
+  // Relevance gate: a bare product word ("basic", "side", "comfort") drags in
+  // dictionaries and unrelated shops. Keep hits that mention the retailer with
+  // the garment, or enough of the product's own name.
+  const tokens = name.split(/[^a-z-]+/).filter((w) => w.length >= 4 && !NAME_STOP.has(w));
+  const noun = name.split(/[^a-z-]+/).filter(Boolean).pop() ?? '';
+  const relevant = (r) => {
+    try { if (JUNK_HOSTS.test(new URL(r.url).hostname)) return false; } catch { return false; }
+    if (r.source === 'reddit') return true; // query already scoped to the retailer
+    const hay = `${r.title} ${r.snippet ?? ''}`.toLowerCase();
+    const strong = tokens.filter((t) => hay.includes(t)).length;
+    const brand = /\bzara\b/.test(hay);
+    const hasNoun = noun.length >= 4 && hay.includes(noun);
+    return (brand && (hasNoun || strong >= 1)) || (strong >= 2 && hasNoun) || strong >= 3;
+  };
   const results = [...byName.reddit, ...byName.youtube, ...byName.bing];
-  const merged = dedupe(results).slice(0, 12);
+  const merged = dedupe(results.filter(relevant)).slice(0, 12);
   // Queries tuned per venue — for the agent's own native web-search tool,
   // which usually reaches further than our keyless server-side sources.
   const suggestedQueries = [
@@ -130,9 +147,10 @@ export async function findReviews(productName, { extraTerms = '' } = {}) {
     suggestedQueries,
     agentInstructions:
       'If you have a native web-search tool, run the suggestedQueries with it NOW and synthesize what people say (fit, quality, sizing up/down) together with the results above. The human already asked for reviews — do not ask permission to search.',
+    usable: merged.length > 0,
     note: merged.length
-      ? 'Aggregated public mentions — the retailer has no on-site reviews, so these are Reddit/YouTube/web opinions about this or closely similar items.'
-      : 'No public reviews reachable from this server\'s network for this exact item. The retailer has no on-site reviews; opinions live in Reddit threads and YouTube try-ons — use your own web-search tool with suggestedQueries, or the searchLinks below.',
+      ? 'Aggregated public mentions — the retailer has no on-site reviews, so these are Reddit/YouTube/web opinions about this or closely similar items (relevance-filtered).'
+      : 'No relevant public reviews found for this exact item from this server. The retailer has no on-site reviews; opinions live in Reddit threads and YouTube try-ons — run suggestedQueries with your own web-search tool. Do not cite searchLinks as reviews.',
     searchLinks: [
       `https://www.reddit.com/search/?q=${encodeURIComponent(`zara ${productName.toLowerCase()}`)}`,
       `https://www.youtube.com/results?search_query=${encodeURIComponent(`zara ${productName.toLowerCase()} review`)}`,

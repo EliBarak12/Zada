@@ -18,12 +18,12 @@ const PORT = 4993;
 const BASE = `http://localhost:${PORT}`;
 const OUT_DIR = path.resolve('demo');
 
-for (const f of ['cart', 'profile', 'signals', 'prices']) fs.rmSync(`/tmp/zas-demo-${f}.json`, { force: true });
+for (const f of ['cart', 'profile', 'signals', 'prices', 'notes']) fs.rmSync(`/tmp/zas-demo-${f}.json`, { force: true });
 fs.mkdirSync(OUT_DIR, { recursive: true });
 for (const f of fs.readdirSync(OUT_DIR)) fs.rmSync(path.join(OUT_DIR, f), { force: true });
 
 const server = spawn('node', ['server/index.mjs'], {
-  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-demo-prices.json', PROFILE_DB: '/tmp/zas-demo-profile.json', CART_DB: '/tmp/zas-demo-cart.json', SIGNALS_DB: '/tmp/zas-demo-signals.json' },
+  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-demo-prices.json', PROFILE_DB: '/tmp/zas-demo-profile.json', CART_DB: '/tmp/zas-demo-cart.json', SIGNALS_DB: '/tmp/zas-demo-signals.json', NOTES_DB: '/tmp/zas-demo-notes.json' },
   stdio: 'ignore',
 });
 await sleep(2500);
@@ -127,7 +127,7 @@ try {
 
   // ——— Scene 0: what this is ———
   await caption('shop', 'This is Zada — the store that shops with you. A live fashion storefront where you and your AI agent shop together, in one shared session.');
-  await caption('shop', 'On load, the page registers fourteen tools with the browser through WebMCP. Outside the tab, the same tools are served over remote MCP — and every call renders right here, in the store.');
+  await caption('shop', 'The page registers sixteen tools with the browser through WebMCP; the same tools are served over remote MCP — and every call renders right here.');
 
   // ——— Scene 1: setup ———
   await caption('you', 'I wear M, waist 32, shoe 43 — now let me just shop. Watch what the store learns.');
@@ -142,7 +142,7 @@ try {
   await sleep(1000);
 
   // ——— Scene 2: human browsing — every move is an event ———
-  await caption('shop', 'Every view, every second you linger, every heart becomes an event the store can use.');
+  await caption('shop', 'Every view, every second you linger, every heart becomes an event the store can use.', 2200);
   await humanClick('#grid .card:nth-of-type(2)');
   await page.waitForSelector('#detail .detail-info h2', { timeout: 10000 });
   await waitImages('#detail .gallery img');
@@ -180,7 +180,41 @@ try {
   await scrollTo('.panels', 'start');
   const n = (reviews.results ?? []).length;
   const verdict = price.verdict ?? price.report?.verdict ?? '';
-  await caption('agent', `${n ? `I found ${n} mentions across Reddit, YouTube and the web — they’re in the reviews panel.` : 'The retailer has no on-site reviews, so I pulled live search links into the panel.'} ${verdict ? `On price: ${verdict}` : 'The price panel shows the live markdown and the history the shop tracks.'}`);
+  await caption('agent', `${n ? `I found ${n} relevant mention${n === 1 ? '' : 's'} across Reddit, YouTube and the web — in the reviews panel.` : 'No relevant public reviews from here — I’ll use my own web search.'} ${verdict ? `On price: ${verdict}` : 'The price panel shows the live markdown and the history the shop tracks.'}`);
+  await hideCursor();
+
+  // ——— Scene 3b: the agent asks IN the store; the human taps ———
+  await scrollTo('#topbar', 'start');
+  const asking = call('ask_shopper', { question: 'What matters most for this one?', choices: ['Fit', 'Price', 'The look'], product_id: pid, wait_seconds: 40 });
+  await page.waitForSelector('#__question .q-choice', { timeout: 10000 });
+  await sleep(600);
+  await caption('shop', 'The agent asks in the store, not in chat. A card, three choices — you just tap.', 2800);
+  await humanClick('#__question .q-choice:nth-of-type(1)');
+  const answer = await asking.catch(() => ({}));
+  await hideCursor();
+  await caption('agent', `${answer.choice ?? 'Fit'} it is. I read the reviews on the web — let me put what I found on the page, not in a paragraph.`);
+
+  // ——— Scene 3c: the agent writes its verdict onto the product page ———
+  const SRC = { reddit: 'reddit', youtube: 'youtube' };
+  const sources = (reviews.results ?? []).slice(0, 3).map((v) => ({
+    source: SRC[String(v.source ?? '').toLowerCase()] ?? 'web',
+    title: String(v.title ?? 'Review').slice(0, 140),
+    url: String(v.url),
+    quote: v.snippet ? String(v.snippet).slice(0, 200) : undefined,
+  })).filter((s) => /^https?:\/\//.test(s.url));
+  await call('post_findings', {
+    product_id: pid,
+    verdict: `${n ? `People mention comfort and a true-to-size fit across ${n} mentions` : 'Nothing negative surfaced'} — ${size.inStockAnywhere ? `take ${sizeName}, it’s in stock.` : 'take your usual size.'}`,
+    fit: 'regular through the leg', sizing: 'true to size',
+    recommended_size: size.inStockAnywhere ? sizeName : undefined,
+    confidence: n ? 'high' : 'medium',
+    findings: sources,
+  }).catch(() => {});
+  await page.waitForSelector('.panel.agent-note', { timeout: 10000 }).catch(() => {});
+  await scrollTo('.panel.agent-note', 'start');
+  await caption('agent', 'Here it is — my verdict, the sources I actually read, and the size to take, right on the product page.');
+  await scrollTo('.sizes');
+  await caption('shop', 'That blue chip is the agent’s pick. It’s already selected — one tap adds it to the bag.', 2600);
   await hideCursor();
 
   // ——— Scene 4: the shop nudges — events talking back ———
@@ -211,10 +245,7 @@ try {
   if (railCount >= 2) {
     await humanClick('#rails .rail:last-of-type .mini:nth-of-type(1)');
     const opened = await page.waitForSelector('#detail:not([hidden]) .detail-info h2', { timeout: 12000 }).then(() => true).catch(() => false);
-    if (opened) {
-      await waitImages('#detail .gallery img');
-      await caption('shop', 'Picked for you → straight into the product, size chips and all.', 2600);
-    }
+    if (opened) await waitImages('#detail .gallery img');
   }
   await hideCursor();
 
@@ -224,13 +255,13 @@ try {
   const cur = sig.current ?? {};
   const where = cur.view === 'product' ? `on ${cur.name}` : cur.view === 'grid' ? `looking at results for ${cur.query}` : cur.view === 'bag' ? 'in your bag' : cur.view === 'similar' ? 'exploring similar items' : 'on the home page';
   const trail = (sig.journey ?? []).slice(-3).map((s) => `${s.action}${s.name ? ` ${s.name.toLowerCase()}` : s.query ? ` for ${s.query}` : ''}`).join(', then ');
-  await caption('agent', `You’re ${where}, for about ${cur.sinceSeconds ?? 0} seconds. Your trail: ${trail}. I can see the page you’re on and the road that led here — not just what you searched.`);
+  await caption('agent', `You’re ${where}, for about ${cur.sinceSeconds ?? 0} seconds. Your trail: ${trail}. Every result I get tells me where you are and what you just did — so I never have to ask.`);
 
   // ——— Scene 7: the agent as amplifier ———
   await caption('you', 'So what’s my pattern — and what should I actually buy?');
   const themes = (sig.taste?.themes ?? []).slice(0, 3).map((t) => t.word.toLowerCase());
   const lovedCount = (sig.loved ?? []).length;
-  await caption('agent', `You loved ${lovedCount} item${lovedCount === 1 ? '' : 's'} and kept lingering on ${themes.join(', ')}. ${lovedCount === 1 ? 'That love is the strongest signal — want it in your size?' : 'Your loves are the strongest signal — want them in your size?'}`);
+  await caption('agent', `You loved ${lovedCount} item${lovedCount === 1 ? '' : 's'} and kept lingering on ${themes.join(', ')}. ${lovedCount === 1 ? 'Want it in your size?' : 'Want them in your size?'}`);
 
   await caption('you', lovedCount === 1 ? 'Yes — bag it, my size.' : 'Yes — bag both, my size.', 2200);
   for (const l of (sig.loved ?? []).slice(0, 2)) await call('add_to_cart', { product_id: l.productId }).catch(() => {});

@@ -1,6 +1,6 @@
 # Connecting agents to Zada
 
-Two surfaces, same eight tools:
+Two surfaces, same sixteen tools:
 
 - **A — In-page WebMCP**: the storefront registers its tools with
   `document.modelContext` (and the `navigator.modelContext` alias) on load,
@@ -35,7 +35,7 @@ with every connector-based agent today.
 ## ChatGPT (desktop app browser) — WebMCP, natively, today
 
 Since 2026-08-25 the ChatGPT desktop app's built-in browser consumes page
-tools. Open the storefront in it and the agent can call all 11 tools in-page —
+tools. Open the storefront in it and the agent can call all 16 tools in-page —
 no connector setup at all. Notes: latest desktop app only, not the
 Enterprise/Edu tiers, and its safety layer asks the user to confirm
 consequential actions (e.g. `add_to_cart`) — expected and fine.
@@ -98,7 +98,7 @@ Cursor renders returned product images inline in chat.
 
 - **Chrome 149+**: enable `chrome://flags/#enable-webmcp-testing` (or an
   origin-trial token for your domain), open the storefront — the badge in the
-  hero shows “WebMCP: 8 tools registered in-page”. Test with Google's
+  hero shows “WebMCP: 16 tools registered in-page”. Test with Google's
   **Model Context Tool Inspector** extension or the community WebMCP Inspector.
 - **MCP-B / WebMCP extension**: discovers the page's tools across tabs and
   bridges them to desktop MCP clients (e.g. Cursor) through its

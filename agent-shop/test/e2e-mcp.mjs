@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const PORT = 4991;
+const BASE = `http://localhost:${PORT}`;
 const URL_ = `http://localhost:${PORT}/mcp`;
 
 let failures = 0;
@@ -21,8 +22,9 @@ function check(name, cond, extra = '') {
 import fs from 'node:fs';
 fs.rmSync('/tmp/zas-test-cart.json', { force: true });
 fs.rmSync('/tmp/zas-test-signals.json', { force: true });
+fs.rmSync('/tmp/zas-test-notes.json', { force: true });
 const server = spawn('node', ['server/index.mjs'], {
-  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-test-prices.json', PROFILE_DB: '/tmp/zas-test-profile.json', CART_DB: '/tmp/zas-test-cart.json', SIGNALS_DB: '/tmp/zas-test-signals.json' },
+  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-test-prices.json', PROFILE_DB: '/tmp/zas-test-profile.json', CART_DB: '/tmp/zas-test-cart.json', SIGNALS_DB: '/tmp/zas-test-signals.json', NOTES_DB: '/tmp/zas-test-notes.json' },
   stdio: 'inherit',
 });
 await sleep(2000);
@@ -34,7 +36,7 @@ try {
   check('connected over streamable HTTP', true);
 
   const { tools } = await client.listTools();
-  check('lists 14 tools', tools.length === 14, tools.map((t) => t.name).join(', '));
+  check('lists 16 tools', tools.length === 16, tools.map((t) => t.name).join(', '));
   check('every tool has a JSON schema', tools.every((t) => t.inputSchema?.type === 'object'));
 
   console.log('\n— search_products("men\'s pants")');
@@ -42,6 +44,7 @@ try {
   const search = parse(await client.callTool({ name: 'search_products', arguments: { query: "men's pants", limit: 8 } }));
   check('resolves MAN section', search.section === 'MAN');
   check('finds products', search.products.length > 0, `${search.products.length} of ${search.total}`);
+  const p1 = (search.products ?? [])[1] ?? (search.products ?? [])[0];
   const p0 = search.products[0];
   check('products carry ids/names/prices', Boolean(p0.id && p0.name && p0.price));
   check('products carry image URLs', p0.images.length > 0 && p0.images[0].startsWith('https://static.zara.net'));
@@ -68,6 +71,7 @@ try {
   check('review search ran across sources', reviews.sources.length === 3, reviews.sources.map((s) => `${s.source}:${s.ok ? s.count : 'blocked'}`).join(' '));
   check('returns results or honest fallback links', reviews.results.length > 0 || reviews.searchLinks.length > 0, `${reviews.results.length} mentions`);
   check('steers the agent to its own native search', reviews.suggestedQueries?.length >= 3 && /web-search tool/.test(reviews.agentInstructions ?? ''), reviews.suggestedQueries?.[0]);
+  check('steers the agent to publish its verdict in the store', /post_findings/.test(reviews.agentInstructions ?? ''));
 
   console.log('\n— filter by anything');
   const sized = parse(await client.callTool({ name: 'search_products', arguments: { query: "men's pants", limit: 6, in_my_size_only: true } }));
@@ -107,6 +111,50 @@ try {
     j.slice(-3).map((s) => `${s.who}: ${s.action}`).join(' → '),
   );
   check('journey records the love, attributed to the agent', j.some((s) => s.action === 'loved ♥' && s.productId === lovedRes.productId && s.who === 'agent'));
+
+  console.log('\n— every agent result carries where the human is + what they did since');
+  const post = (name, body) => fetch(`${BASE}/api/tools/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-channel': 'web' }, body: JSON.stringify(body) });
+  const humanClick = await post('get_product', { product_id: p0.id }); // the human opens a product in the store
+  check('human action accepted', humanClick.ok);
+  const nxt = parse(await client.callTool({ name: 'list_categories', arguments: { section: 'MAN' } }));
+  check('result carries shopper.current (where the human is right now)', nxt.shopper?.current?.view === 'product' && nxt.shopper.current.setBy === 'human', `${nxt.shopper?.current?.view} · ${nxt.shopper?.current?.name}`);
+  check('result carries what the human did since the last call', (nxt.shopper?.sinceYourLastCall ?? []).some((s) => s.who === 'human' && s.action === 'opened product'), nxt.shopper?.sinceYourLastCall?.map((s) => s.action).join(', '));
+  const nxt2 = parse(await client.callTool({ name: 'list_categories', arguments: { section: 'MAN' } }));
+  check('inbox drains — nothing new second time', (nxt2.shopper?.sinceYourLastCall ?? []).length === 0);
+  check('shopper context carries the saved sizes', nxt2.shopper?.sizes && typeof nxt2.shopper.sizes === 'object', JSON.stringify(nxt2.shopper?.sizes));
+  const quiet = parse(await client.callTool({ name: 'check_price', arguments: { product_id: p1.id } }));
+  check('a lookup on a product the human is not looking at stays quiet', quiet.onScreen === false && /not on screen/.test(quiet.humanSees ?? ''), quiet.humanSees?.slice(0, 60));
+  const still = parse(await client.callTool({ name: 'list_categories', arguments: { section: 'MAN' } }));
+  check('…and does not move the human’s current location', still.shopper?.current?.productId === opened.id, `${still.shopper?.current?.view} · ${still.shopper?.current?.name}`);
+
+  console.log('\n— ask_shopper: the agent asks in the store, the human taps');
+  const asked = parse(await client.callTool({ name: 'ask_shopper', arguments: { question: 'Fit or price?', choices: ['Fit', 'Price'], wait_seconds: 0 } }));
+  check('question is pending until somebody taps', asked.answered === false && typeof asked.questionId === 'string', asked.questionId);
+  const tapRes = await fetch(`${BASE}/api/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: asked.questionId, choice: 'Fit' }) });
+  check('the human’s tap is accepted', tapRes.ok);
+  const ans = parse(await client.callTool({ name: 'get_answer', arguments: { question_id: asked.questionId } }));
+  check('agent reads the tapped choice back', ans.answered === true && ans.choice === 'Fit', ans.choice);
+  const pendingCall = client.callTool({ name: 'ask_shopper', arguments: { question: 'Which direction?', choices: ['Casual', 'Smart'], wait_seconds: 20 } });
+  await new Promise((r) => setTimeout(r, 700));
+  const sigQ = parse(await client.callTool({ name: 'get_shopper_signals', arguments: {} }));
+  const openQ = (sigQ.pendingQuestions ?? []).find((q) => q.question === 'Which direction?');
+  check('a pending question is visible in shopper signals', Boolean(openQ?.id), openQ?.question);
+  await fetch(`${BASE}/api/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: openQ?.id, choice: 'Smart' }) });
+  const live = parse(await pendingCall);
+  check('a waiting ask_shopper resolves the moment the human taps', live.answered === true && live.choice === 'Smart', `${live.answeredAfterMs}ms`);
+
+  console.log('\n— post_findings: the agent writes its verdict onto the product page');
+  const sizeLabel = opened.colorDetails?.[0]?.sizes?.find((s) => s.availability === 'in_stock')?.name ?? null;
+  const posted = parse(await client.callTool({ name: 'post_findings', arguments: {
+    product_id: p0.id, verdict: 'Comfortable, slightly slim in the thigh; take your usual size.', sizing: 'true to size',
+    recommended_size: sizeLabel ?? undefined, confidence: 'medium',
+    findings: [{ source: 'reddit', title: 'r/malefashionadvice thread', url: 'https://www.reddit.com/r/malefashionadvice/', quote: 'fits true to size' }],
+  } }));
+  check('verdict accepted and placed on the product page', posted.ok === true && /product page/.test(posted.shownOn ?? ''), posted.shownOn);
+  const again = parse(await client.callTool({ name: 'get_product', arguments: { product_id: p0.id } }));
+  check('verdict persists on the product (survives reload)', again.agentFindings?.verdict?.startsWith('Comfortable') && (sizeLabel ? again.agentFindings.recommendedSize === sizeLabel : true), `size ${again.agentFindings?.recommendedSize}`);
+  const bad = await client.callTool({ name: 'post_findings', arguments: { product_id: p0.id, verdict: 'x'.repeat(10), findings: [{ source: 'web', title: 't', url: 'javascript:alert(1)' }] } }).catch((e) => ({ isError: true, content: [{ text: String(e) }] }));
+  check('rejects non-http source URLs', bad.isError === true, bad.content?.[0]?.text?.slice(0, 80));
 
   console.log('\n— cart: add in my size → view → remove');
   const added = parse(await client.callTool({ name: 'add_to_cart', arguments: { product_id: p0.id } }));

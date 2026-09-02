@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 // Zara storefront data client.
 // Uses the same public JSON endpoints the zara.com web app calls (?ajax=true),
 // which respond to plain HTTPS requests carrying ordinary browser headers.
@@ -51,7 +53,32 @@ async function getJson(url, { fast403 = false } = {}) {
 // interstitial. We follow the interstitial once, keep the cookies, and read
 // the same product object from window.zara.viewPayload embedded in the page.
 
-const urlById = new Map(); // productId -> product page URL, recorded on search
+// productId -> product page URL, recorded on search. Persisted, so a restart
+// (Fly redeploy, crash) never strands a product behind "run search first".
+const URLS_FILE = process.env.PRODUCT_URLS_DB ?? path.join(process.cwd(), 'data', 'product-urls.json');
+function loadUrlMap() {
+  try { return Object.entries(JSON.parse(fs.readFileSync(URLS_FILE, 'utf8'))).map(([k, v]) => [Number(k), v]); } catch { return []; }
+}
+const urlById = new Map(loadUrlMap());
+let urlSaveTimer = null;
+function setUrl(id, url) {
+  if (!id || !url || urlById.get(id) === url) return;
+  urlById.set(id, url);
+  clearTimeout(urlSaveTimer);
+  urlSaveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(URLS_FILE), { recursive: true });
+      fs.writeFileSync(URLS_FILE, JSON.stringify(Object.fromEntries(urlById)));
+    } catch { /* best effort */ }
+  }, 500);
+}
+
+// Colourways of one product share a model key (the first two reference
+// segments) — the identity that groups variant ids across tools.
+export function modelKey(ref) {
+  const m = String(ref ?? '').split('/').slice(0, 2).join('/');
+  return m || null;
+}
 
 let pageCookies = '';
 function collectCookies(res) {
@@ -124,10 +151,10 @@ async function detailFromPage(productId) {
   // The page product carries its own (master) id — alias it to the same URL
   // and cache entry so follow-up calls on that id resolve too.
   if (product.id && product.id !== Number(productId)) {
-    urlById.set(product.id, url);
+    setUrl(product.id, url);
     cache.set(`page:${product.id}`, { ts: Date.now(), data: product });
   }
-  for (const c of product.detail?.colors ?? []) if (c.productId) urlById.set(c.productId, url);
+  for (const c of product.detail?.colors ?? []) if (c.productId) setUrl(c.productId, url);
   return product;
 }
 
@@ -216,13 +243,14 @@ export function summarize(p, { imageWidth = 750, maxImages = 6 } = {}) {
   // when Akamai blocks the JSON endpoint (see detailFromPage).
   const pageUrl = productUrl(p);
   if (pageUrl) {
-    urlById.set(p.id, pageUrl);
-    for (const c of colors) if (c.productId) urlById.set(c.productId, pageUrl);
+    setUrl(p.id, pageUrl);
+    for (const c of colors) if (c.productId) setUrl(c.productId, pageUrl);
   }
   return {
     id: p.id,
     name: p.name,
     reference: p.detail?.displayReference || p.detail?.reference || p.reference || null,
+    model: modelKey(p.detail?.displayReference || p.detail?.reference || p.reference),
     section: p.sectionName ?? null,
     family: p.familyName ?? null,
     price,
@@ -388,18 +416,29 @@ export async function similarProducts(productId, { limit = 8 } = {}) {
     .slice(-4); // trailing words carry the garment type
   const res = await searchProducts(terms.join(' ').toLowerCase(), {
     section: p.sectionName ?? undefined,
-    limit: limit + 4,
+    limit: limit * 2 + 6,
   });
-  return {
-    anchor: { id: p.id, name: p.name },
-    products: res.products.filter((x) => x.id !== p.id && x.id !== productId).slice(0, limit),
-  };
+  // "More like this" means other products — never the anchor's own colourways,
+  // and one card per model rather than a colour picker.
+  const anchorModel = modelKey(p.detail?.displayReference || p.detail?.reference || p.reference);
+  const anchorIds = new Set([p.id, Number(productId), ...(p.detail?.colors ?? []).map((c) => c.productId).filter(Boolean)]);
+  const seen = new Set();
+  const products = res.products.filter((x) => {
+    if (anchorIds.has(x.id)) return false;
+    const m = x.model ?? modelKey(x.reference);
+    if (anchorModel && m === anchorModel) return false;
+    if (m && seen.has(m)) return false;
+    if (m) seen.add(m);
+    return true;
+  }).slice(0, limit);
+  return { anchor: { id: p.id, name: p.name }, products };
 }
 
 export function detailView(p) {
   const base = summarize(p, { maxImages: 12 });
   const colors = (p.detail?.colors ?? []).map((c) => ({
     id: c.id,
+    productId: c.productId ?? null, // the colourway's own id (what search rows carry)
     name: c.name,
     hex: c.hexCode ?? null,
     price: c.price ?? null,

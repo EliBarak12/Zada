@@ -111,6 +111,7 @@ function showNudge(n) {
   const el = document.createElement('div');
   el.id = '__nudge';
   el.className = 'nudge';
+  if (document.getElementById('__question')) el.classList.add('below');
   const similarMode = n.mode === 'similar';
   el.innerHTML = similarMode
     ? `<span>You loved <b>${esc(n.theme)}</b> ♥ — want to see similar pieces${Object.keys(state.profile).length ? ', in your size' : ''}?</span>
@@ -130,6 +131,40 @@ function showNudge(n) {
   });
   el.querySelector('.nudge-x').addEventListener('click', () => el.remove());
   setTimeout(() => el.remove(), 25_000);
+}
+
+/* The agent asks IN the store (ask_shopper): a card with choices; the tap
+ * resolves the agent's pending tool call through /api/answers. Persistent —
+ * no auto-dismiss — until answered or closed. */
+function showQuestion(q) {
+  document.getElementById('__question')?.remove();
+  document.getElementById('__nudge')?.remove();
+  const el = document.createElement('div');
+  el.id = '__question';
+  el.className = 'nudge question';
+  el.dataset.qid = q.id;
+  el.innerHTML = `
+    <div class="q-body">
+      <span class="q-who">Your agent asks${q.productName ? ` · ${esc(q.productName)}` : ''}</span>
+      <span class="q-text">${esc(q.question)}</span>
+      <div class="q-choices">
+        ${(q.choices ?? []).map((c) => `<button class="nudge-go q-choice" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}
+        ${q.allowFreeText ? `<input class="q-free" placeholder="or type…" maxlength="200" aria-label="Type an answer" />` : ''}
+      </div>
+    </div>
+    <button class="nudge-x" aria-label="dismiss">✕</button>`;
+  document.body.appendChild(el);
+  const send = (body) => {
+    el.classList.add('sent');
+    fetch('/api/answers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: q.id, ...body }) })
+      .catch(() => {})
+      .finally(() => { el.remove(); if (!body.dismissed) flash(`Sent to your agent: ${body.choice ?? body.text}`); });
+  };
+  for (const b of el.querySelectorAll('.q-choice')) b.addEventListener('click', () => send({ choice: b.dataset.choice }));
+  el.querySelector('.q-free')?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && ev.target.value.trim()) send({ text: ev.target.value.trim() });
+  });
+  el.querySelector('.nudge-x').addEventListener('click', () => send({ dismissed: true }));
 }
 
 document.addEventListener('click', (ev) => {
@@ -164,9 +199,34 @@ function flash(message) {
   setTimeout(() => el.remove(), 8000);
 }
 
+/* A quiet agent action with no visual footprint here (a lookup on another
+ * product, an item added to the bag): one line, optional action, gone in 8s. */
+function notice(text, action) {
+  document.getElementById('__notice')?.remove();
+  const el = document.createElement('div');
+  el.id = '__notice';
+  el.className = 'nudge notice';
+  if (document.getElementById('__question')) el.classList.add('below');
+  el.innerHTML = `<span>${esc(text)}</span>${action ? `<button class="nudge-go">${esc(action.label)}</button>` : ''}<button class="nudge-x" aria-label="dismiss">✕</button>`;
+  document.body.appendChild(el);
+  el.querySelector('.nudge-go')?.addEventListener('click', () => { el.remove(); action.run(); });
+  el.querySelector('.nudge-x').addEventListener('click', () => el.remove());
+  setTimeout(() => el.remove(), 8000);
+}
+
+/* Bring a freshly rendered agent panel into view and flash it. */
+function reveal(sel) {
+  setTimeout(() => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.classList.add('agent-flash');
+  }, 120);
+}
+
 let statusTimer = null;
 function markAgentActive(channel) {
-  if (channel === 'web') return;
+  if (channel === 'web' || channel === 'shop') return; // humans and the shop itself are not "the agent"
   const el = $('#agentStatus');
   el.dataset.state = 'active';
   $('#agentStatusText').textContent = channel === 'webmcp' ? 'agent acting (in-page)' : 'agent acting (remote MCP)';
@@ -188,6 +248,7 @@ function money(cents, currency) {
 function show(el) {
   for (const id of ['hero', 'grid', 'detail']) $('#' + id).hidden = id !== el;
   if (el === 'hero') $('#hero').hidden = false;
+  state.lastView = el;
 }
 
 function renderGrid(view) {
@@ -253,6 +314,30 @@ function sparkline(history, currency) {
 function renderPanels(productId) {
   const p = state.panels[productId] ?? {};
   let html = '';
+  if (p.note) {
+    const n = p.note;
+    const facts = [
+      n.fit && `Fit · ${n.fit}`,
+      n.quality && `Quality · ${n.quality}`,
+      n.sizing && `Sizing · ${n.sizing}`,
+      n.recommendedSize && `Take ${n.recommendedSize}`,
+    ].filter(Boolean);
+    const who = n.by === 'webmcp' ? 'in-page agent' : n.by === 'mcp' ? 'remote agent' : 'your agent';
+    const srcs = n.findings ?? [];
+    html += `
+      <div class="panel agent-note">
+        <h3>Your agent found</h3>
+        <div class="subtitle">${esc(who)} · ${srcs.length} source${srcs.length === 1 ? '' : 's'}${n.confidence ? ` · ${esc(n.confidence)} confidence` : ''}</div>
+        <div class="price-verdict${n.confidence === 'high' ? ' good' : ''}">${esc(n.verdict)}</div>
+        ${facts.length ? `<div class="note-facts">${facts.map(esc).join(' · ')}</div>` : ''}
+        ${srcs.map((f) => `
+          <div class="review">
+            <span class="src">${esc(f.source)}</span>
+            <a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.title)}</a>
+            ${f.quote ? `<div class="snip">“${esc(f.quote)}”</div>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
   if (p.price) {
     const r = p.price.report ?? p.price;
     const good = r.onSale || /lowest/i.test(r.verdict ?? '');
@@ -293,7 +378,7 @@ function renderPanels(productId) {
   return html ? `<div class="panels">${html}</div>` : '';
 }
 
-function renderDetail(product, { colorIndex = 0 } = {}) {
+function renderDetail(product, { colorIndex = product.selectedColorIndex ?? 0 } = {}) {
   if (dwell?.productId !== product.id) trackView(product.id, product.name);
   state.detail = product;
   const cur = state.lastGrid?.currency ?? 'ILS';
@@ -301,9 +386,14 @@ function renderDetail(product, { colorIndex = 0 } = {}) {
   const color = colors[colorIndex] ?? colors[0] ?? { images: product.images, sizes: [] };
   const imgs = (color.images?.length ? color.images : product.images) ?? [];
   const sizeCheck = state.panels[product.id]?.sizeCheck;
+  // What the agent wrote onto this product (live event, or persisted on the product).
+  const note = state.panels[product.id]?.note ?? product.agentFindings ?? null;
+  if (note) (state.panels[product.id] ??= {}).note = note;
+  const agentPick = note?.recommendedSize ? String(note.recommendedSize).toLowerCase() : null;
+  let selectedSize = null;
   $('#detail').innerHTML = `
     <div class="detail-top agent-flash">
-      <div class="gallery">${imgs.slice(0, 9).map((u) => `<img src="${esc(img(u))}" alt="${esc(product.name)}" loading="lazy"/>`).join('')}</div>
+      <div class="gallery">${imgs.slice(0, 6).map((u) => `<img src="${esc(img(u))}" alt="${esc(product.name)}" loading="lazy"/>`).join('')}</div>
       <div class="detail-info">
         <button class="back" id="backBtn">← BACK TO RESULTS</button>
         <h2>${esc(product.name)} ${heartBtn(product.id, 'love love-detail')}</h2>
@@ -324,10 +414,13 @@ function renderDetail(product, { colorIndex = 0 } = {}) {
         <div class="sizes">${(color.sizes ?? [])
           .map((s) => {
             const buyable = s.availability === 'in_stock' || s.availability === 'low_on_stock';
-            return `<span class="size${s.isYourSize ? ' yours' : ''}${buyable ? ' selectable' : ''}" data-size="${esc(s.name)}" data-a="${esc(s.availability)}" title="${esc(s.availability)}">${esc(s.name)}</span>`;
+            const picked = agentPick && buyable && String(s.name).toLowerCase() === agentPick;
+            if (picked) selectedSize = s.name;
+            return `<span class="size${s.isYourSize ? ' yours' : ''}${buyable ? ' selectable' : ''}${picked ? ' agent-pick selected' : ''}" data-size="${esc(s.name)}" data-a="${esc(s.availability)}" title="${picked ? 'Your agent recommends this size' : esc(s.availability)}">${esc(s.name)}</span>`;
           })
           .join('')}</div>
         <div class="size-legend">black border — in stock · orange — low stock · struck — unavailable · click a size to pick it</div>
+        ${selectedSize && agentPick ? `<div class="agent-pick-note">Your agent’s pick · ${esc(selectedSize)}${note?.sizing ? ` · ${esc(note.sizing)}` : ''}</div>` : ''}
         <button class="addbag" id="addBagBtn">ADD TO BAG</button>
         ${product.url ? `<a class="zara-link" href="${esc(product.url)}" target="_blank" rel="noopener noreferrer">VIEW ON THE RETAILER'S SITE</a>` : ''}
       </div>
@@ -351,7 +444,6 @@ function renderDetail(product, { colorIndex = 0 } = {}) {
   for (const btn of document.querySelectorAll('.cbtn')) {
     btn.addEventListener('click', () => renderDetail(product, { colorIndex: Number(btn.dataset.ci) }));
   }
-  let selectedSize = null;
   for (const chip of document.querySelectorAll('.size.selectable')) {
     chip.addEventListener('click', () => {
       const on = chip.classList.contains('selected');
@@ -389,6 +481,9 @@ function renderCart(view) {
   const cur = view.currency ?? 'ILS';
   $('#bagCount').textContent = view.count ?? 0;
   const items = view.items ?? [];
+  // KEEP SHOPPING goes back to where the human was, not to some grid.
+  if (!state.inBag) state.bagReturn = state.lastView === 'detail' && state.detail ? 'detail' : state.lastGrid ? 'grid' : 'hero';
+  state.inBag = true;
   $('#detail').innerHTML = `
     <div class="bag-wrap agent-flash">
       <button class="back" id="backBtn">← KEEP SHOPPING</button>
@@ -399,7 +494,7 @@ function renderCart(view) {
           <img src="${esc(img(i.image))}" alt="${esc(i.name)}" data-pid="${i.productId}" title="Open product"/>
           <div class="bi-main">
             <div class="bi-name">${esc(i.name)}</div>
-            <div class="bi-meta">${esc(i.color ?? '')} · size ${esc(i.size)}${i.quantity > 1 ? ` · ×${i.quantity}` : ''}${i.matchType && i.matchType !== 'exact' ? ` · <span title="${esc(i.matchType)}">≈ your ${esc(i.sizeRequested)}</span>` : ''}</div>
+            <div class="bi-meta">${esc(i.color ?? '')} · size ${esc(i.size)}${i.quantity > 1 ? ` · ×${i.quantity}` : ''}${i.matchType && i.matchType !== 'exact' ? ` · <span title="${esc(i.matchType)}">≈ your ${esc(i.sizeRequested)}</span>` : ''}${i.addedBy ? ` · <span class="bi-by${i.addedBy === 'agent' ? ' agent' : ''}">added by ${i.addedBy === 'agent' ? 'your agent' : 'you'}</span>` : ''}</div>
             <div class="bi-flags">
               ${i.priceDropped ? `<span class="drop">▼ PRICE DROPPED SINCE ADDED</span>` : ''}
               ${i.availabilityNow === 'out_of_stock' ? `<span class="oos">NOW OUT OF STOCK</span>` : ''}
@@ -422,7 +517,10 @@ function renderCart(view) {
     </div>`;
   show('detail');
   $('#backBtn')?.addEventListener('click', () => {
-    if (state.lastGrid) {
+    state.inBag = false;
+    if (state.bagReturn === 'detail' && state.detail) {
+      renderDetail(state.detail);
+    } else if (state.lastGrid) {
       renderGrid(state.lastGrid);
       navSignal('grid', state.lastGrid.query ?? null);
     } else {
@@ -463,40 +561,71 @@ function handleEvent(e) {
       break;
     case 'size':
       (state.panels[v.product.id] ??= {}).sizeCheck = v.match;
+      if (v.navigate === false) { // agent checked a product the human isn't looking at
+        notice(`Your agent checked size ${v.match?.checked ?? ''} on ${v.product.name}: ${v.match?.inStockAnywhere ? 'in stock' : 'not in stock'}`, { label: 'OPEN', run: () => callTool('get_product', { product_id: v.product.id }, 'web').catch(() => {}) });
+        break;
+      }
       renderDetail(v.product);
+      reveal('.sizes');
       break;
     case 'reviews': {
       if (v.productId) {
         (state.panels[v.productId] ??= {}).reviews = v;
-        if (state.detail?.id === v.productId) renderDetail(state.detail);
+        if (state.detail?.id === v.productId) { renderDetail(state.detail); reveal('.panels'); }
+        else if (v.navigate === false) notice(`Your agent found ${v.results?.length ?? 0} reviews for ${v.productName}`, { label: 'OPEN', run: () => callTool('get_product', { product_id: v.productId }, 'web').catch(() => {}) });
         else callTool('get_product', { product_id: v.productId }, e.channel === 'web' ? 'web' : e.channel).catch(() => {});
       } else if (state.detail) {
         (state.panels[state.detail.id] ??= {}).reviews = v;
         renderDetail(state.detail);
+        reveal('.panels');
       }
       break;
     }
     case 'price':
       (state.panels[v.product.id] ??= {}).price = { report: v.report };
-      if (state.detail?.id === v.product.id) renderDetail(state.detail);
-      else renderDetail(v.product);
+      if (state.detail?.id === v.product.id) { renderDetail(state.detail); reveal('.panels'); }
+      else if (v.navigate === false) notice(`Your agent checked the price of ${v.product.name}: ${v.report?.verdict ?? v.product.priceText}`, { label: 'OPEN', run: () => callTool('get_product', { product_id: v.product.id }, 'web').catch(() => {}) });
+      else { renderDetail(v.product); reveal('.panels'); }
       break;
     case 'profile':
       renderProfile(v.profile);
       break;
     case 'cart':
       $('#bagCount').textContent = v.count ?? 0;
+      if (v.navigate === false && v.added) { // add-to-bag never yanks the human away
+        $('#bagChip').classList.add('pop');
+        setTimeout(() => $('#bagChip').classList.remove('pop'), 400);
+        notice(`${v.added.addedBy === 'agent' ? 'Your agent added' : 'Added'} ${v.added.name} · ${v.added.size}${v.added.color ? ` · ${v.added.color}` : ''} to your bag`, { label: 'VIEW BAG', run: () => callTool('view_cart', {}, 'web').catch(() => {}) });
+        break;
+      }
       renderCart(v);
       break;
     case 'similar': {
       (state.panels[v.productId] ??= {}).similar = v.products ?? [];
-      if (state.detail?.id === v.productId) renderDetail(state.detail);
+      if (state.detail?.id === v.productId) { renderDetail(state.detail); reveal('.similar-row'); }
       else if (v.products?.length) renderGrid({ kind: 'grid', query: `similar to ${v.anchorName}`, section: '', products: v.products, total: v.products.length, currency: state.lastGrid?.currency ?? 'ILS' });
       break;
     }
     case 'nudge':
       showNudge(v);
       break;
+    case 'question':
+      showQuestion(v);
+      break;
+    case 'answered': {
+      const el = document.getElementById('__question');
+      if (el && el.dataset.qid === v.id) el.remove();
+      break;
+    }
+    case 'agent_note': {
+      (state.panels[v.productId] ??= {}).note = v.note;
+      const alias = e.args?.product_id;
+      if (alias && alias !== v.productId) (state.panels[alias] ??= {}).note = v.note;
+      if (state.detail?.id === v.productId || state.detail?.id === alias) { renderDetail(state.detail); reveal('.panel.agent-note'); }
+      else if (v.navigate === false) notice(`Your agent wrote its verdict on ${v.productName}`, { label: 'OPEN', run: () => callTool('get_product', { product_id: v.productId }, 'web').catch(() => {}) });
+      else callTool('get_product', { product_id: v.productId }, e.channel === 'web' ? 'web' : e.channel).catch(() => {});
+      break;
+    }
     case 'love': {
       state.loved = new Set(v.lovedIds ?? []);
       // Zara sometimes resolves a grid id to its master product id — mirror
@@ -511,11 +640,17 @@ function handleEvent(e) {
 
 function connectSSE() {
   const es = new EventSource('/api/events');
+  es.onopen = () => {
+    const st = $('#agentStatus');
+    if (st.dataset.state === 'offline') { st.dataset.state = 'idle'; $('#agentStatusText').textContent = 'agent idle'; }
+  };
   es.onmessage = (m) => {
     try { handleEvent(JSON.parse(m.data)); } catch { /* ignore */ }
   };
   es.onerror = () => {
     es.close();
+    $('#agentStatus').dataset.state = 'offline';
+    $('#agentStatusText').textContent = 'reconnecting…';
     setTimeout(connectSSE, 2500);
   };
 }
@@ -599,7 +734,17 @@ document.addEventListener('click', (ev) => {
   if (heart) {
     ev.stopPropagation();
     const id = Number(heart.dataset.love);
-    callTool('love_item', { product_id: id, love: !state.loved.has(id) }, 'web').catch(() => {});
+    const love = !state.loved.has(id);
+    // Optimistic: the heart fills the instant you tap; the server confirms
+    // over SSE (and we roll back if the call fails).
+    if (love) state.loved.add(id); else state.loved.delete(id);
+    patchHearts();
+    heart.classList.add('pop');
+    setTimeout(() => heart.classList.remove('pop'), 300);
+    callTool('love_item', { product_id: id, love }, 'web').catch(() => {
+      if (love) state.loved.delete(id); else state.loved.add(id);
+      patchHearts();
+    });
     return;
   }
   const card = ev.target.closest('.card');
@@ -633,7 +778,7 @@ $('#bagChip').addEventListener('click', () => callTool('view_cart', {}, 'web').c
 $('#mcpUrl').textContent = `${location.origin}/mcp`;
 connectSSE();
 registerWebMCP();
-callTool('get_my_sizes', {}, 'web').then((r) => renderProfile(r.profile)).catch(() => {});
+fetch('/api/profile').then((r) => r.json()).then((p) => renderProfile(p.profile)).catch(() => {});
 fetch('/api/cart').then((r) => r.json()).then((c) => ($('#bagCount').textContent = c.count ?? 0)).catch(() => {});
 fetch('/api/loved').then((r) => r.json()).then((l) => { state.loved = new Set(l.ids ?? []); patchHearts(); }).catch(() => {});
 renderHeroRails();

@@ -22,8 +22,9 @@ const check = (name, cond, extra = '') => {
 import fs from 'node:fs';
 fs.rmSync('/tmp/zas-web-cart.json', { force: true });
 fs.rmSync('/tmp/zas-web-signals.json', { force: true });
+fs.rmSync('/tmp/zas-web-notes.json', { force: true });
 const server = spawn('node', ['server/index.mjs'], {
-  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-web-prices.json', PROFILE_DB: '/tmp/zas-web-profile.json', CART_DB: '/tmp/zas-web-cart.json', SIGNALS_DB: '/tmp/zas-web-signals.json' },
+  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-web-prices.json', PROFILE_DB: '/tmp/zas-web-profile.json', CART_DB: '/tmp/zas-web-cart.json', SIGNALS_DB: '/tmp/zas-web-signals.json', NOTES_DB: '/tmp/zas-web-notes.json' },
   stdio: 'inherit',
 });
 await sleep(2000);
@@ -67,9 +68,9 @@ try {
   await page.waitForFunction(() => window.__webmcp?.registered?.length > 0, null, { timeout: 10000 });
   const reg = await page.evaluate(() => window.__webmcp);
   check('page detected modelContext', reg.available === true);
-  check('registered all 14 tools in-page', reg.registered.length === 14, reg.registered.join(', '));
+  check('registered all 16 tools in-page', reg.registered.length === 16, reg.registered.join(', '));
   const badge = await page.textContent('#webmcpBadge');
-  check('UI badge confirms registration', /14 tools registered/.test(badge), badge.trim());
+  check('UI badge confirms registration', /16 tools registered/.test(badge), badge.trim());
 
   console.log('\n— agent calls search via the page-registered WebMCP tool');
   const searchRes = await page.evaluate(async () => {
@@ -111,7 +112,7 @@ try {
   // Attribution flashes as "agent acting (in-page)" for ~3s after each call —
   // fire a cheap read-only call and catch the flash.
   const sawInPage = await page
-    .evaluate(() => document.modelContext._call('get_my_sizes', {}))
+    .evaluate(() => document.modelContext._call('list_categories', { section: 'MAN' }))
     .then(() => page.waitForFunction(() => /in-page/.test(document.querySelector('#agentStatusText').textContent), null, { timeout: 3000 }))
     .then(() => true, () => false);
   check('status attributes actions to the in-page agent', sawInPage);
@@ -136,7 +137,12 @@ try {
     await document.modelContext._call('set_my_sizes', { tops: 'M', bottoms: '32', shoes: '43' });
     await document.modelContext._call('add_to_cart', { product_id: id });
   }, pid);
+  // Adding never yanks the human away: a notice appears, the view stays.
+  await page.waitForSelector('#__notice', { timeout: 5000 });
+  check('agent add-to-bag shows a notice instead of navigating', /added/i.test(await page.textContent('#__notice')) && (await page.locator('#detail:not([hidden]) .bag-item').count()) === 0);
+  await page.evaluate(() => document.modelContext._call('view_cart', {}));
   await page.waitForSelector('.bag-item', { timeout: 8000 });
+  check('bag lines say who added them', /added by your agent/i.test(await page.textContent('.bag-item')));
   const bagCount = await page.textContent('#bagCount');
   check('bag view opened with the item', (await page.locator('.bag-item').count()) === 1, `badge shows ${bagCount}`);
   check('bag badge updated', Number(bagCount) >= 1);
@@ -163,6 +169,30 @@ try {
   });
   check('current location is the product the human opened, attributed to them', sig.current?.view === 'product' && sig.current?.setBy === 'human', `${sig.current?.view} · ${sig.current?.name} (${sig.current?.sinceSeconds}s)`);
   check('journey trail is recorded in order', Array.isArray(sig.journey) && sig.journey.length >= 3, sig.journey?.slice(-3).map((s) => `${s.who}: ${s.action}`).join(' → '));
+
+  console.log('\n— the agent asks in the store; the human taps; the agent gets the answer');
+  const asking = page.evaluate(async () => {
+    const r = await document.modelContext._call('ask_shopper', { question: 'Fit or price?', choices: ['Fit', 'Price'], wait_seconds: 20 });
+    return JSON.parse(r.content[0].text);
+  });
+  await page.waitForSelector('#__question .q-choice', { timeout: 8000 });
+  await page.screenshot({ path: '/tmp/zas-question.png' });
+  await page.click('#__question .q-choice:nth-of-type(2)');
+  const answered = await asking;
+  check('the tap resolves the agent’s pending ask_shopper call', answered.answered === true && answered.choice === 'Price', `${answered.choice} after ${answered.answeredAfterMs}ms`);
+  await page.waitForFunction(() => !document.getElementById('__question'), null, { timeout: 3000 }).catch(() => {});
+  check('question card leaves the screen after the tap', (await page.locator('#__question').count()) === 0);
+
+  console.log('\n— the agent writes its verdict onto the product page');
+  const openId = await page.evaluate(() => state.detail?.id ?? null);
+  const firstSize = (await page.locator('#detail .size.selectable').first().textContent().catch(() => ''))?.trim() || null;
+  await page.evaluate(async ({ id, size }) => {
+    await document.modelContext._call('post_findings', { product_id: id, verdict: 'Runs slightly slim; take your usual size.', sizing: 'true to size', recommended_size: size ?? undefined, confidence: 'high', findings: [{ source: 'youtube', title: 'Try-on review', url: 'https://www.youtube.com/', quote: 'true to size' }] });
+  }, { id: openId, size: firstSize });
+  await page.waitForSelector('.panel.agent-note', { timeout: 8000 });
+  check('“Your agent found” panel renders on the product page', /Runs slightly slim/.test(await page.textContent('.panel.agent-note')));
+  if (firstSize) check('the recommended size chip is flagged AGENT: TAKE THIS and pre-selected', (await page.locator('.size.agent-pick.selected').count()) === 1, firstSize);
+  await page.screenshot({ path: '/tmp/zas-findings.png' });
 } catch (err) {
   console.error('WEB E2E fatal:', err);
   await page.screenshot({ path: '/tmp/zas-fail.png' }).catch(() => {});

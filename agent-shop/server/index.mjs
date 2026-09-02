@@ -6,7 +6,8 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TOOLS, executeTool, onActivity, maybeNudge } from './tools.mjs';
+import { TOOLS, executeTool, onActivity, maybeNudge, broadcast, readProfile } from './tools.mjs';
+import { answerQuestion } from './questions.mjs';
 import { cartSummary } from './cart.mjs';
 import { recordSignal, recordNav, lovedItems, recentlyViewed, pickedForYou } from './signals.mjs';
 import { similarProducts } from './zara.mjs';
@@ -14,6 +15,8 @@ import { handleMcpRequest } from './mcp.mjs';
 import { zodToJsonSchema } from './zod-json.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+process.on('uncaughtException', (err) => console.error('[zada] uncaught exception:', err));
+process.on('unhandledRejection', (err) => console.error('[zada] unhandled rejection:', err));
 const PORT = Number(process.env.PORT ?? 4977);
 const WEBMCP_ORIGIN_TRIAL_TOKEN = process.env.WEBMCP_ORIGIN_TRIAL_TOKEN?.trim();
 
@@ -118,6 +121,9 @@ app.get('/img', async (req, res) => {
   }
 });
 
+// Quiet size-profile read for page boot (no activity event).
+app.get('/api/profile', (_req, res) => res.json({ profile: readProfile() }));
+
 // Quiet bag-count read for page boot (no activity event, unlike view_cart).
 app.get('/api/cart', (_req, res) => {
   const s = cartSummary();
@@ -137,6 +143,26 @@ app.post('/api/signals', (req, res) => {
   }
   res.json({ ok: true });
 });
+// The human's tap on an ask_shopper card: resolve the agent's pending call,
+// record it as a signal, and dismiss the card in every open tab.
+app.post('/api/answers', (req, res) => {
+  const { id, choice, text, dismissed } = req.body ?? {};
+  const q = answerQuestion(String(id ?? ''), {
+    choice: typeof choice === 'string' ? choice.slice(0, 80) : null,
+    text: typeof text === 'string' ? text.slice(0, 200) : null,
+    dismissed: Boolean(dismissed),
+  });
+  if (!q) return res.status(404).json({ ok: false, error: 'unknown, expired or already-answered question' });
+  const a = q.answer;
+  recordSignal({ type: 'answer', channel: 'web', questionId: q.id, question: q.question, choice: a.choice, text: a.text, dismissed: a.dismissed, productId: q.productId, name: q.productName });
+  broadcast({
+    channel: 'web', tool: 'answer', args: { id: q.id },
+    view: { kind: 'answered', id: q.id, choice: a.choice, text: a.text, dismissed: a.dismissed },
+    summary: a.dismissed ? 'Dismissed the agent’s question' : `Answered “${a.choice ?? a.text}”`,
+  });
+  res.json({ ok: true });
+});
+
 app.get('/api/loved', (_req, res) => {
   res.json({ ids: lovedItems().map((l) => l.productId) });
 });

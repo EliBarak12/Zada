@@ -108,7 +108,7 @@ main { flex: 1; display: flex; min-height: 0; }
 /* ----------------------------------------------------------------- detail */
 #detail { padding: 0; }
 .detail-top { display: flex; gap: 0; flex-wrap: wrap; }
-.gallery { flex: 1.2; min-width: 360px; display: grid; grid-template-columns: 1fr; gap: 2px; }
+.gallery { flex: 1.2; min-width: 360px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; align-content: start; }
 .gallery img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; background: #f6f6f6; }
 .detail-info { flex: 1; min-width: 330px; padding: 54px 56px; position: sticky; top: 96px; align-self: flex-start; }
 .detail-info .back { font-size: 9px; letter-spacing: 0.24em; color: var(--muted); margin-bottom: 34px; display: inline-block; }
@@ -194,6 +194,33 @@ main { flex: 1; display: flex; min-height: 0; }
 .nudge-go:hover { background: var(--paper); color: var(--ink); }
 .nudge-x { color: #999; font-size: 12px; }
 
+/* ---------------------------------------------- the agent asks, in the store */
+.nudge.question { align-items: flex-start; max-width: min(760px, 94vw); }
+.nudge.question.sent { opacity: .5; pointer-events: none; }
+.nudge.below { top: 190px; }
+.nudge.notice { background: var(--agent); box-shadow: 0 6px 24px rgba(36,69,255,.28); }
+.nudge.notice .nudge-x { color: rgba(255,255,255,.7); }
+#bagChip.pop { animation: pop .4s ease; }
+.agent-status[data-state="offline"] { color: var(--warn); }
+.agent-status[data-state="offline"] .dot { background: var(--warn); }
+.bi-by { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.bi-by.agent { color: var(--agent); }
+.q-body { display: flex; flex-direction: column; gap: 10px; }
+.q-who { font-size: 8px; letter-spacing: .28em; color: #8fa8ff; text-transform: uppercase; }
+.q-text { font-size: 12px; line-height: 1.5; letter-spacing: .04em; }
+.q-choices { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.q-free { background: transparent; border: none; border-bottom: 1px solid #666; color: var(--paper); font: inherit; font-size: 11px; letter-spacing: .06em; padding: 6px 2px; min-width: 170px; outline: none; }
+.q-free::placeholder { color: #888; }
+
+/* ---------------------------------------------- the agent writes, in the store */
+.panel.agent-note h3 { color: var(--agent); }
+.panel.agent-note .price-verdict { border-color: var(--agent); }
+.panel.agent-note .price-verdict.good { color: var(--ink); }
+.note-facts { font-size: 9px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); margin: -8px 0 18px; }
+.size.agent-pick { outline: 2px solid var(--agent); outline-offset: -1px; border-color: var(--agent); }
+.agent-pick-note { margin-top: 10px; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--agent); }
+.size.agent-pick.selected { background: var(--agent); color: var(--paper); }
+
 /* -------------------------------------------------------------------- bag */
 .bag-wrap { padding: 44px 40px; max-width: 980px; }
 .bag-wrap h2 { font-size: 15px; font-weight: 400; letter-spacing: 0.22em; text-transform: uppercase; margin-bottom: 6px; }
@@ -221,15 +248,22 @@ main { flex: 1; display: flex; min-height: 0; }
 
 .love {
   position: absolute; top: 8px; right: 8px; z-index: 2;
-  width: 30px; height: 30px;
-  background: transparent; border: none;
-  font-size: 16px; line-height: 1; color: var(--ink); transition: color .15s, transform .15s;
+  width: 42px; height: 42px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.88); border: none;
+  font-size: 22px; line-height: 1; color: var(--ink);
+  transition: transform .12s ease, color .12s ease, background .12s ease;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
 .card .love { position: absolute; }
 .card .ph { position: relative; }
-.love:hover { color: var(--sale); transform: scale(1.12); }
+.love:hover { color: var(--sale); transform: scale(1.1); background: #fff; }
+.love:active { transform: scale(.92); }
 .love.on { color: var(--sale); }
-.love-detail { position: static; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-left: 10px; }
+.love.pop { animation: pop .3s ease; }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+.love-detail { position: static; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-left: 10px; background: transparent; border: 1px solid var(--hairline); }
+.love-detail.on, .love-detail:hover { border-color: var(--sale); }
 
 /* ----------------------------------------------------------------- dialog */
 #sizeDialogBackdrop { position: fixed; inset: 0; background: rgba(17,17,17,.45); display: flex; align-items: center; justify-content: center; z-index: 90; }

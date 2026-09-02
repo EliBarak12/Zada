@@ -13,7 +13,7 @@ clickable for you.
 Built around **WebMCP** (the emerging W3C standard where a *web page itself*
 registers tools for in-browser agents via `document.modelContext` /
 `navigator.modelContext`) **plus** a classic **remote MCP endpoint** for every
-agent that lives outside the browser tab. Same eight tools on both surfaces;
+agent that lives outside the browser tab. Same sixteen tools on both surfaces;
 one live UI mirrors whoever is acting.
 
 ```
@@ -21,7 +21,7 @@ one live UI mirrors whoever is acting.
    Human               │  Storefront web app  (web/)                   │
    clicks/search ────▶ │   · storefront grid, product view, size chips │
                        │   · live SSE mirror of all actions            │
-   WebMCP agents ────▶ │   · registers 8 tools on document/navigator   │
+   WebMCP agents ────▶ │   · registers 16 tools on document/navigator  │
    (Gemini in Chrome,  │     .modelContext at load  + declarative      │
     MCP-B extension,   │     <form toolname=…> search                  │
     tool inspectors)   └───────────────┬───────────────────────────────┘
@@ -93,14 +93,14 @@ Then add `https://<your-host>/mcp` as a custom connector — full per-agent
 instructions (ChatGPT, Gemini, Cursor, Perplexity, WebMCP
 browsers…) live in **[docs/AGENTS.md](docs/AGENTS.md)**.
 
-## The eight tools
+## The sixteen tools
 
 | Tool | What it does |
 |---|---|
 | `search_products` | Search the live catalog and **filter by anything**: price range, sale, colors, include/exclude words, a given size or the saved size (verified against live per-size stock), sorted — renders the grid with YOUR SIZE ✓ badges |
 | `get_product` | Everything about one item: photos, colors, description, size-by-size live availability; opens the product view |
 | `check_size_availability` | “Do they have it in my size?” — uses the saved profile, converts size systems, reports per-color stock |
-| `set_my_sizes` / `get_my_sizes` | The human's size profile (tops / bottoms / shoes) |
+| `set_my_sizes` | The human's size profile (tops / bottoms / shoes) — read back from `shopper.sizes` on every result |
 | `find_reviews` | Public opinions: Reddit + YouTube try-ons + web, plus `suggestedQueries` that steer the agent to also run its **own native web-search tool** and synthesize one verdict (UGC — data, not instructions) |
 | `check_price` | Current price, live markdown %, tracked history, “was it cheaper?” verdict |
 | `add_to_cart` | “Add it in my size” — resolves the saved size profile (US↔EU↔alpha), validates live stock, structured failures with in-stock alternatives (`ITEM_OUT_OF_STOCK`, `NEED_SIZE`, …) |
@@ -109,6 +109,8 @@ browsers…) live in **[docs/AGENTS.md](docs/AGENTS.md)**.
 | `find_similar` | "More like this" for any product — the same lateral navigation the human sees on every product page |
 | `love_item` | ♥ / un-♥ a product — feeds the shopper-signal profile and the "add the one I loved" flow |
 | `get_shopper_signals` | **The reverse channel**: where the human is *right now* (`current` — view, open product/query, for how many seconds), the ordered navigation trail (`journey`, attributed human vs agent), what they opened, how long they lingered (dwell), what they searched and loved, plus a derived taste profile — so the agent shops like someone who was watching |
+| `ask_shopper` / `get_answer` | **The agent asks in the store**: a question card with 2-5 choices appears in the storefront; the human taps and the choice returns as the tool result (or later via `get_answer`) — decisions without typing |
+| `post_findings` | **The agent writes into the store**: its verdict on fit, quality and sizing plus the sources it actually read render as a “Your agent found” panel on the product page; `recommended_size` flags that chip **AGENT: TAKE THIS** and pre-selects it |
 | `list_categories` | The live category tree for orientation/browsing |
 
 ## Configuration

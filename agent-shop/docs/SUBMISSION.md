@@ -12,11 +12,11 @@ Winners: ~Sep 23 · 10 winners ($3,000 cash + partner credits each).
 | Public code repository with an open source license file visible in the About section | ✅ **https://github.com/EliBarak12/Zada** (public). `LICENSE` (MIT) is at the repo root — verify it shows in the About section, in an incognito window. |
 | Text description (why WebMCP fits, UX improvement, human+agent together, implementation) | ✅ Draft below — paste into Devpost. |
 | < 3-minute public YouTube video, clear demo, with audio, **no third-party trademarks** | ⬜ **Record needed** — script below. UI is branded "Zada"; avoid saying the retailer's name on mic. |
-| Functional WebMCP tool registration code in the repo | ✅ `web/app.js` (`registerWebMCP()`): 14 tools on `document.modelContext` / `navigator.modelContext`, awaited `registerTool`, `provideContext` fallback, declarative `<form toolname>` search. |
+| Functional WebMCP tool registration code in the repo | ✅ `web/app.js` (`registerWebMCP()`): 16 tools on `document.modelContext` / `navigator.modelContext`, awaited `registerTool`, `provideContext` fallback, declarative `<form toolname>` search. |
 | New project during the Submission Period | ✅ Built entirely during the submission period (opened Aug 25, 2026). |
 
 Testing before submitting: latest ChatGPT desktop app → open https://tools-it.fly.dev/
-in its browser → the hero badge should read "WebMCP: 14 tools registered in-page" →
+in its browser → the hero badge should read "WebMCP: 16 tools registered in-page" →
 ask ChatGPT to search. In Chrome: `chrome://flags/#enable-webmcp-testing` →
 Enabled → relaunch.
 
@@ -53,7 +53,7 @@ agent fills the bag, but checkout is human-gated — each bag line links straigh
 to the item on the retailer's site.
 
 *Implementation.* One Node server, three surfaces, one tool layer:
-(1) in-page WebMCP — 14 tools registered on `document.modelContext`
+(1) in-page WebMCP — 16 tools registered on `document.modelContext`
 (navigator fallback, `provideContext` legacy fallback, plus a declarative
 `<form toolname>` search); (2) the same tools as a remote MCP server
 (streamable HTTP `/mcp`) for ChatGPT, Cursor, Gemini CLI — remote calls mirror
@@ -72,7 +72,7 @@ asserting the UI mirrors every call.
 
 | Time | Shot | Say |
 |---|---|---|
-| 0:00–0:15 | Storefront hero, badge "WebMCP: 14 tools registered in-page" | "This is Zada — a storefront that registers its own tools with the browser, so your AI agent can shop it *with* you. This is WebMCP." |
+| 0:00–0:15 | Storefront hero, badge "WebMCP: 16 tools registered in-page" | "This is Zada — a storefront that registers its own tools with the browser, so your AI agent can shop it *with* you. This is WebMCP." |
 | 0:15–0:45 | ChatGPT in-app browser, prompt: *"search for men's pants under 250"* → grid fills, status dot lights up | "I ask in plain language. The agent calls the page's search tool — no clicking, no screenshots — and the shop renders what it found, live, with the agent indicator lit." |
 | 0:45–1:15 | *"which of these come in my size?"* → product view, YOURS chip on EU 42 | "It knows my sizes — I saved them once. I wear a 32; this is European-sized, so the shop converts it and flags the EU 42 as mine, with live stock." |
 | 1:15–1:45 | *"check reviews and whether the price dropped"* → review + price panels | "The catalog has no on-site reviews, so the shop aggregates Reddit and YouTube try-ons — and hands the agent tuned queries for its own web search. The price panel shows the live markdown signal plus the history the shop tracks itself." |

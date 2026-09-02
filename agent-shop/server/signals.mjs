@@ -27,9 +27,11 @@ function save() {
   }, 200);
 }
 
+let seq = 0;
 export function recordSignal(event) {
   const d = load();
-  d.events.push({ ts: new Date().toISOString(), ...event });
+  if (!seq) seq = d.events.reduce((m, e) => Math.max(m, e.seq ?? 0), 0);
+  d.events.push({ ts: new Date().toISOString(), seq: ++seq, ...event });
   if (d.events.length > MAX_EVENTS) d.events.splice(0, d.events.length - MAX_EVENTS);
   save();
 }
@@ -49,17 +51,22 @@ export function setLoved(product, loved, channel = 'web') {
 // skipped so sinceSeconds measures arrival, not the last re-render.
 
 let lastLocSig = null;
+let lastLocChannel = null;
 function pushLoc(channel, loc) {
   const sig = `${loc.view}|${loc.productId ?? ''}|${loc.query ?? ''}`;
-  if (sig === lastLocSig) return;
+  // Same place again: skip re-renders by the same actor (size check after
+  // opening, etc.) and agent re-renders of where the human already is — but a
+  // HUMAN arriving somewhere the agent showed them is a real move, keep it.
+  if (sig === lastLocSig && (channel === lastLocChannel || channel !== 'web')) return;
   lastLocSig = sig;
+  lastLocChannel = channel;
   recordSignal({ type: 'loc', channel, ...loc });
 }
 
 // Called from the activity bus for every emitted event with a rendered view.
 export function recordLocation(e) {
   const v = e?.view;
-  if (!v) return;
+  if (!v || v.navigate === false) return; // quiet lookups don't move the human
   switch (v.kind) {
     case 'grid':
       return pushLoc(e.channel, { view: 'grid', query: v.query ?? null });
@@ -82,7 +89,7 @@ export function recordNav(view, query = null) {
   pushLoc('web', { view, query });
 }
 
-function currentLocation() {
+export function currentLocation() {
   const d = load();
   for (let i = d.events.length - 1; i >= 0; i--) {
     const e = d.events[i];
@@ -99,24 +106,71 @@ function currentLocation() {
   return { view: 'home', productId: null, name: null, query: null, setBy: null, sinceSeconds: null };
 }
 
-// The ordered trail: navigation (loc) plus loves, attributed per actor.
-// Dwell stays out (aggregated in focus); human searches surface as the grid
-// they rendered, so agent and human searches read the same way.
+// One event → one human-readable step (shared by the journey and the inbox).
+function stepFor(e, { withDwell = false } = {}) {
+  const who = e.channel === 'web' ? 'human' : e.channel === 'shop' ? 'shop' : 'agent';
+  const base = { at: e.ts, who };
+  if (e.type === 'loc') {
+    if (e.view === 'grid') return { ...base, action: 'viewed results', query: e.query ?? null };
+    if (e.view === 'product') return { ...base, action: 'opened product', productId: e.productId, name: e.name };
+    if (e.view === 'similar') return { ...base, action: 'explored similar items', name: e.name ?? null };
+    if (e.view === 'bag') return { ...base, action: 'opened the bag' };
+    if (e.view === 'home') return { ...base, action: 'went to the home page' };
+    return null;
+  }
+  if (e.type === 'love') return { ...base, action: 'loved ♥', productId: e.productId, name: e.name };
+  if (e.type === 'unlove') return { ...base, action: 'removed love', productId: e.productId, name: e.name };
+  if (e.type === 'question') return { ...base, action: 'asked', question: e.question, productId: e.productId ?? null, name: e.name ?? null };
+  if (e.type === 'answer') return { ...base, action: e.dismissed ? 'dismissed the question' : 'answered', choice: e.choice ?? e.text ?? null, question: e.question };
+  if (e.type === 'agent_write') return { ...base, action: 'wrote a verdict on', productId: e.productId, name: e.name };
+  if (e.type === 'bag_add') return { ...base, action: 'added to bag', productId: e.productId, name: e.name, size: e.size ?? null, color: e.color ?? null };
+  if (e.type === 'bag_remove') return { ...base, action: 'removed from bag', productId: e.productId ?? null, name: e.name ?? null };
+  if (e.type === 'nudge') return { ...base, action: 'offered a shortcut around', theme: e.theme };
+  if (withDwell && e.type === 'dwell' && e.ms >= 5000) return { ...base, action: 'lingered', seconds: Math.round(e.ms / 1000), productId: e.productId, name: e.name };
+  return null;
+}
+
+// The ordered trail: navigation (loc) plus loves and questions, attributed
+// per actor. Dwell stays out (aggregated in focus); human searches surface as
+// the grid they rendered, so agent and human searches read the same way.
 function journeySteps(limit = 14) {
   const d = load();
   const steps = [];
-  for (const e of d.events) {
-    const who = e.channel === 'web' ? 'human' : e.channel === 'shop' ? 'shop' : 'agent';
-    if (e.type === 'loc') {
-      if (e.view === 'grid') steps.push({ at: e.ts, who, action: 'viewed results', query: e.query ?? null });
-      else if (e.view === 'product') steps.push({ at: e.ts, who, action: 'opened product', productId: e.productId, name: e.name });
-      else if (e.view === 'similar') steps.push({ at: e.ts, who, action: 'explored similar items', name: e.name ?? null });
-      else if (e.view === 'bag') steps.push({ at: e.ts, who, action: 'opened the bag' });
-      else if (e.view === 'home') steps.push({ at: e.ts, who, action: 'went to the home page' });
-    } else if (e.type === 'love') steps.push({ at: e.ts, who, action: 'loved ♥', productId: e.productId, name: e.name });
-    else if (e.type === 'unlove') steps.push({ at: e.ts, who, action: 'removed love', productId: e.productId, name: e.name });
-  }
+  for (const e of d.events) { const s = stepFor(e); if (s) steps.push(s); }
   return steps.slice(-limit);
+}
+
+// ------------------------------------------------------------ agent inbox
+// What the human (and the shop itself) did since this agent channel last
+// called a tool. Rides along in every tool result as `shopper`, so the agent
+// sees the human's moves without being told — the one event channel that
+// works identically on every client, because it is just data in a result.
+const cursors = {}; // channel -> last seq drained
+export function drainInbox(channel, limit = 6) {
+  const d = load();
+  const last = d.events.length ? d.events[d.events.length - 1].seq ?? 0 : 0;
+  const from = cursors[channel];
+  cursors[channel] = last;
+  const now = Date.now();
+  // First contact: hand over the human's recent trail (last 10 minutes), so
+  // the agent's very first result already knows what they have been doing.
+  const firstContact = from == null;
+  const cutoff = now - 10 * 60_000;
+  const out = [];
+  for (const e of d.events) {
+    if (firstContact ? new Date(e.ts).getTime() < cutoff : (e.seq ?? 0) <= from) continue;
+    if (!(e.channel === 'web' || e.channel === 'shop')) continue;
+    const s = stepFor(e, { withDwell: true });
+    if (s) out.push({ ...s, agoSeconds: Math.max(0, Math.round((now - new Date(e.ts).getTime()) / 1000)) });
+  }
+  return out.slice(-limit);
+}
+
+export function shopperContext(channel) {
+  const since = drainInbox(channel);
+  const ctx = { current: currentLocation(), sinceYourLastCall: since };
+  if (since.length) ctx.hint = 'The human did this since your last call — acknowledge it in one sentence and build on it.';
+  return ctx;
 }
 
 export function lovedItems() {
@@ -194,7 +248,7 @@ export function shopperSummary() {
   // Focus: dwell per product + view counts.
   const focus = {};
   for (const e of human) {
-    if (!e.productId) continue;
+    if (!e.productId || ['question', 'answer', 'agent_write', 'loc'].includes(e.type)) continue;
     const f = (focus[e.productId] ??= { productId: e.productId, name: e.name ?? null, views: 0, dwellMs: 0, lastSeen: e.ts });
     if (e.name) f.name = e.name;
     if (e.type === 'view') f.views++;
@@ -224,6 +278,7 @@ export function shopperSummary() {
     loved: loved.map((l) => ({ productId: l.productId, name: l.name, price: l.price, priceText: l.priceText, family: l.family ?? null, color: l.color ?? null, lovedAt: l.lovedAt })),
     focus: topFocus,
     recentSearches: human.filter((e) => e.type === 'search').slice(-6).map((e) => e.query),
+    answers: human.filter((e) => e.type === 'answer' && !e.dismissed).slice(-5).map((e) => ({ at: e.ts, question: e.question, choice: e.choice ?? e.text ?? null, productId: e.productId ?? null })),
     taste: {
       themes,
       lovedPriceBand: prices.length ? { min: Math.min(...prices), max: Math.max(...prices) } : null,
