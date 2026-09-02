@@ -8,7 +8,7 @@
     "test": "test"
   },
   "scripts": {
-    "test": "node test/e2e-mcp.mjs && node test/e2e-web.mjs",
+    "test": "node test/webmcp-origin-trial.mjs && node test/e2e-mcp.mjs && node test/e2e-web.mjs",
     "start": "node server/index.mjs"
   },
   "keywords": [],

@@ -118,6 +118,23 @@ browsers…) live in **[docs/AGENTS.md](docs/AGENTS.md)**.
 | `PORT` | `4977` | HTTP port (UI + API + MCP) |
 | `ZARA_STORE` / `ZARA_LANG` | `il` / `en` | Catalog store & language (e.g. `us`/`en`, `es`/`es`) |
 | `PRICE_DB` / `PROFILE_DB` | `./data/*.json` | Where price history & size profile persist |
+| `WEBMCP_ORIGIN_TRIAL_TOKEN` | unset | Chrome WebMCP origin-trial token for this exact public HTTPS origin. When unset, the site still supports remote MCP but native WebMCP requires a browser flag or an early-preview build. |
+
+### Enable native WebMCP in Chrome
+
+WebMCP is a browser capability, not a protocol the site can switch on by
+itself. For a public deployment, register the exact HTTPS origin in Chrome's
+WebMCP origin trial, then set the token as a Fly secret and deploy:
+
+```bash
+fly secrets set WEBMCP_ORIGIN_TRIAL_TOKEN='the-token-issued-for-https://tools-it.fly.dev'
+fly deploy --ha=false
+```
+
+The server returns it as the `Origin-Trial` response header. For local
+development, use a Chrome build where WebMCP is enabled (for example through
+the relevant experimental flag) and open the page over a secure context; the
+remote endpoint at `/mcp` remains available in every browser.
 
 ## Testing (all end-to-end, live data)
 
