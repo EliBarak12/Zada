@@ -15,6 +15,7 @@ import { zodToJsonSchema } from './zod-json.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4977);
+const WEBMCP_ORIGIN_TRIAL_TOKEN = process.env.WEBMCP_ORIGIN_TRIAL_TOKEN?.trim();
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -24,6 +25,12 @@ app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
   // Chrome's WebMCP origin trial wants origin-keyed agent clustering.
   res.setHeader('Origin-Agent-Cluster', '?1');
+  // The token is issued for this exact HTTPS origin by Chrome's origin-trial
+  // dashboard. Without it (or Chrome's experimental flag), modelContext is
+  // unavailable and the page falls back to remote MCP.
+  if (WEBMCP_ORIGIN_TRIAL_TOKEN) {
+    res.setHeader('Origin-Trial', WEBMCP_ORIGIN_TRIAL_TOKEN);
+  }
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, mcp-protocol-version, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
