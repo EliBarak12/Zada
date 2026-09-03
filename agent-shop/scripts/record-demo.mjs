@@ -23,7 +23,7 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 for (const f of fs.readdirSync(OUT_DIR)) fs.rmSync(path.join(OUT_DIR, f), { force: true });
 
 const server = spawn('node', ['server/index.mjs'], {
-  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-demo-prices.json', PROFILE_DB: '/tmp/zas-demo-profile.json', CART_DB: '/tmp/zas-demo-cart.json', SIGNALS_DB: '/tmp/zas-demo-signals.json', NOTES_DB: '/tmp/zas-demo-notes.json' },
+  env: { ...process.env, PORT: String(PORT), PRICE_DB: '/tmp/zas-demo-prices.json', PROFILE_DB: '/tmp/zas-demo-profile.json', CART_DB: '/tmp/zas-demo-cart.json', SIGNALS_DB: '/tmp/zas-demo-signals.json', NOTES_DB: '/tmp/zas-demo-notes.json', BRAND_NEUTRAL_TEXT: '1' },
   stdio: 'ignore',
 });
 await sleep(2500);
@@ -204,7 +204,7 @@ try {
   })).filter((s) => /^https?:\/\//.test(s.url));
   await call('post_findings', {
     product_id: pid,
-    verdict: `${n ? `People mention comfort and a true-to-size fit across ${n} mentions` : 'Nothing negative surfaced'} — ${size.inStockAnywhere ? `take ${sizeName}, it’s in stock.` : 'take your usual size.'}`,
+    verdict: `${n ? `People mention comfort and a true-to-size fit across ${n} mention${n === 1 ? '' : 's'}` : 'Nothing negative surfaced'} — ${size.inStockAnywhere ? `take ${sizeName}, it’s in stock.` : 'take your usual size.'}`,
     fit: 'regular through the leg', sizing: 'true to size',
     recommended_size: size.inStockAnywhere ? sizeName : undefined,
     confidence: n ? 'high' : 'medium',

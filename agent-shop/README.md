@@ -120,6 +120,7 @@ browsers…) live in **[docs/AGENTS.md](docs/AGENTS.md)**.
 | `PORT` | `4977` | HTTP port (UI + API + MCP) |
 | `ZARA_STORE` / `ZARA_LANG` | `il` / `en` | Catalog store & language (e.g. `us`/`en`, `es`/`es`) |
 | `PRICE_DB` / `PROFILE_DB` | `./data/*.json` | Where price history & size profile persist |
+| `BRAND_NEUTRAL_TEXT` | unset | Set to `1` for recordings and screenshots: third-party review titles and snippets show “the brand” instead of the retailer's name (links and data untouched) |
 | `WEBMCP_ORIGIN_TRIAL_TOKEN` | unset | Chrome WebMCP origin-trial token for this exact public HTTPS origin. When unset, the site still supports remote MCP but native WebMCP requires a browser flag or an early-preview build. |
 
 ### Enable native WebMCP in Chrome

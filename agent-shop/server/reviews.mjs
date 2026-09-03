@@ -133,6 +133,13 @@ export async function findReviews(productName, { extraTerms = '' } = {}) {
   };
   const results = [...byName.reddit, ...byName.youtube, ...byName.bing];
   const merged = dedupe(results.filter(relevant)).slice(0, 12);
+  // BRAND_NEUTRAL_TEXT=1: third-party review text mentions the retailer by
+  // name; recordings and screenshots must not show third-party trademarks, so
+  // the name becomes "the brand" (links and data stay untouched).
+  if (process.env.BRAND_NEUTRAL_TEXT) {
+    const neutral = (t) => String(t ?? '').replace(/@zara\b/gi, '@thebrand').replace(/\bzara\b/gi, 'the brand');
+    for (const r of merged) { r.title = neutral(r.title); if (r.snippet) r.snippet = neutral(r.snippet); }
+  }
   // Queries tuned per venue — for the agent's own native web-search tool,
   // which usually reaches further than our keyless server-side sources.
   const suggestedQueries = [
