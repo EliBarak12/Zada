@@ -97,7 +97,7 @@ browsers…) live in **[docs/AGENTS.md](docs/AGENTS.md)**.
 
 | Tool | What it does |
 |---|---|
-| `search_products` | Search the live catalog and **filter by anything**: price range, sale, colors, include/exclude words, a given size or the saved size (verified against live per-size stock), sorted — renders the grid with YOUR SIZE ✓ badges |
+| `search_products` | Search the live catalog and **filter by anything**: price range, sale, colors, include/exclude words, a given size or the saved size (verified against live per-size stock), sorted over the whole category with `offset` paging — renders the grid with YOUR SIZE ✓ badges |
 | `get_product` | Everything about one item: photos, colors, description, size-by-size live availability; opens the product view |
 | `check_size_availability` | “Do they have it in my size?” — uses the saved profile, converts size systems, reports per-color stock |
 | `set_my_sizes` | The human's size profile (tops / bottoms / shoes) — read back from `shopper.sizes` on every result |
@@ -105,12 +105,12 @@ browsers…) live in **[docs/AGENTS.md](docs/AGENTS.md)**.
 | `check_price` | Current price, live markdown %, tracked history, “was it cheaper?” verdict |
 | `add_to_cart` | “Add it in my size” — resolves the saved size profile (US↔EU↔alpha), validates live stock, structured failures with in-stock alternatives (`ITEM_OUT_OF_STOCK`, `NEED_SIZE`, …) |
 | `view_cart` | The bag, re-checked live: current price vs price-at-add (**price-drop flags**), current availability, subtotal, per-item retailer checkout links |
-| `remove_from_cart` | Remove a bag line by `cartId` or product id |
+| `remove_from_cart` | Remove a bag line by `cartId` or product id — by product id an agent only removes its own lines; the human's lines need their `cartId`; never moves the screen |
 | `find_similar` | "More like this" for any product — the same lateral navigation the human sees on every product page |
 | `love_item` | ♥ / un-♥ a product — feeds the shopper-signal profile and the "add the one I loved" flow |
 | `get_shopper_signals` | **The reverse channel**: where the human is *right now* (`current` — view, open product/query, for how many seconds), the ordered navigation trail (`journey`, attributed human vs agent), what they opened, how long they lingered (dwell), what they searched and loved, plus a derived taste profile — so the agent shops like someone who was watching |
 | `ask_shopper` / `get_answer` | **The agent asks in the store**: a question card with 2-5 choices appears in the storefront; the human taps and the choice returns as the tool result (or later via `get_answer`) — decisions without typing |
-| `post_findings` | **The agent writes into the store**: its verdict on fit, quality and sizing plus the sources it actually read render as a “Your agent found” panel on the product page; `recommended_size` flags that chip **AGENT: TAKE THIS** and pre-selects it |
+| `post_findings` | **The agent writes into the store**: its verdict on fit, quality and sizing plus the sources it actually read render as a “Your agent found” panel on the product page; `recommended_size` flags that chip as the agent's pick and pre-selects it |
 | `list_categories` | The live category tree for orientation/browsing |
 
 ## Configuration

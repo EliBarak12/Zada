@@ -191,7 +191,7 @@ try {
   }, { id: openId, size: firstSize });
   await page.waitForSelector('.panel.agent-note', { timeout: 8000 });
   check('“Your agent found” panel renders on the product page', /Runs slightly slim/.test(await page.textContent('.panel.agent-note')));
-  if (firstSize) check('the recommended size chip is flagged AGENT: TAKE THIS and pre-selected', (await page.locator('.size.agent-pick.selected').count()) === 1, firstSize);
+  if (firstSize) check('the recommended size chip is flagged as the agent’s pick and pre-selected', (await page.locator('.size.agent-pick.selected').count()) === 1, firstSize);
   await page.screenshot({ path: '/tmp/zas-findings.png' });
 } catch (err) {
   console.error('WEB E2E fatal:', err);

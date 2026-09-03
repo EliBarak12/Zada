@@ -36,12 +36,17 @@ export function addItem(item) {
   return full;
 }
 
-export function removeItem({ cartId, productId }) {
+// onlyAddedBy: when set (e.g. 'agent'), lines added by anyone else survive —
+// an agent removing "by product" never deletes what the human put in.
+export function removeItem({ cartId, productId, onlyAddedBy = null }) {
   const cart = load();
   const before = cart.items.length;
-  cart.items = cart.items.filter(
-    (i) => !(cartId ? i.cartId === cartId : i.productId === productId),
-  );
+  cart.items = cart.items.filter((i) => {
+    const hit = cartId ? i.cartId === cartId : i.productId === productId;
+    if (!hit) return true;
+    if (onlyAddedBy && i.addedBy !== onlyAddedBy) return true;
+    return false;
+  });
   save(cart);
   return before - cart.items.length;
 }

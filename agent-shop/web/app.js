@@ -289,6 +289,9 @@ function renderGrid(view) {
     .join('');
   grid.innerHTML = head + cards;
   show('grid');
+  // The search box shows what the grid shows — unless the human is typing.
+  const si = $('#searchInput');
+  if (si && view.query && document.activeElement !== si && !/^similar to /.test(view.query)) si.value = view.query;
   $('#mySizeToggle')?.addEventListener('click', () => {
     const r = view.requery;
     callTool('search_products', { query: r.query, section: r.section || undefined, in_my_size_only: !r.in_my_size_only }, 'web')
@@ -311,7 +314,8 @@ function sparkline(history, currency) {
   </svg>`;
 }
 
-function renderPanels(productId) {
+// The agent's verdict lives with the size chips — where the decision is made.
+function renderAgentNote(productId) {
   const p = state.panels[productId] ?? {};
   let html = '';
   if (p.note) {
@@ -338,6 +342,12 @@ function renderPanels(productId) {
           </div>`).join('')}
       </div>`;
   }
+  return html;
+}
+
+function renderPanels(productId) {
+  const p = state.panels[productId] ?? {};
+  let html = '';
   if (p.price) {
     const r = p.price.report ?? p.price;
     const good = r.onSale || /lowest/i.test(r.verdict ?? '');
@@ -397,7 +407,7 @@ function renderDetail(product, { colorIndex = product.selectedColorIndex ?? 0 } 
       <div class="detail-info">
         <button class="back" id="backBtn">← BACK TO RESULTS</button>
         <h2>${esc(product.name)} ${heartBtn(product.id, 'love love-detail')}</h2>
-        <div class="ref">${esc(product.reference ?? '')} · ${esc(product.family ?? '')} · ${esc(product.section ?? '')}</div>
+        <div class="ref">${esc(product.reference ?? '')} · ${esc(product.familyEn ?? product.family ?? '')} · ${esc(product.section ?? '')}</div>
         <div class="price">
           ${product.oldPrice ? `<span class="old">${esc(money(product.oldPrice, cur))}</span>` : ''}
           <span class="now${product.onSale ? ' sale' : ''}">${esc(money(product.price, cur))}</span>
@@ -416,11 +426,12 @@ function renderDetail(product, { colorIndex = product.selectedColorIndex ?? 0 } 
             const buyable = s.availability === 'in_stock' || s.availability === 'low_on_stock';
             const picked = agentPick && buyable && String(s.name).toLowerCase() === agentPick;
             if (picked) selectedSize = s.name;
-            return `<span class="size${s.isYourSize ? ' yours' : ''}${buyable ? ' selectable' : ''}${picked ? ' agent-pick selected' : ''}" data-size="${esc(s.name)}" data-a="${esc(s.availability)}" title="${picked ? 'Your agent recommends this size' : esc(s.availability)}">${esc(s.name)}</span>`;
+            return `<span class="size${s.isYourSize ? ' yours' : s.isChecked ? ' checked' : ''}${buyable ? ' selectable' : ''}${picked ? ' agent-pick selected' : ''}" data-size="${esc(s.name)}" data-a="${esc(s.availability)}" title="${picked ? 'Your agent recommends this size' : esc(s.availability)}">${esc(s.name)}</span>`;
           })
           .join('')}</div>
         <div class="size-legend">black border — in stock · orange — low stock · struck — unavailable · click a size to pick it</div>
         ${selectedSize && agentPick ? `<div class="agent-pick-note">Your agent’s pick · ${esc(selectedSize)}${note?.sizing ? ` · ${esc(note.sizing)}` : ''}</div>` : ''}
+        ${renderAgentNote(product.id)}
         <button class="addbag" id="addBagBtn">ADD TO BAG</button>
         ${product.url ? `<a class="zara-link" href="${esc(product.url)}" target="_blank" rel="noopener noreferrer">VIEW ON THE RETAILER'S SITE</a>` : ''}
       </div>
@@ -478,6 +489,7 @@ function renderDetail(product, { colorIndex = product.selectedColorIndex ?? 0 } 
 
 function renderCart(view) {
   flushDwell();
+  document.getElementById('__notice')?.remove(); // “added to your bag” is answered by the bag itself
   const cur = view.currency ?? 'ILS';
   $('#bagCount').textContent = view.count ?? 0;
   const items = view.items ?? [];
@@ -596,6 +608,12 @@ function handleEvent(e) {
         $('#bagChip').classList.add('pop');
         setTimeout(() => $('#bagChip').classList.remove('pop'), 400);
         notice(`${v.added.addedBy === 'agent' ? 'Your agent added' : 'Added'} ${v.added.name} · ${v.added.size}${v.added.color ? ` · ${v.added.color}` : ''} to your bag`, { label: 'VIEW BAG', run: () => callTool('view_cart', {}, 'web').catch(() => {}) });
+        break;
+      }
+      if (v.navigate === false && v.removed) { // a removal updates the bag if it is open, else a notice
+        if (state.inBag) { renderCart(v); break; }
+        const r = v.removed[0];
+        if (r) notice(`${v.removedBy === 'agent' ? 'Your agent removed' : 'Removed'} ${r.name} · ${r.size} from your bag`, { label: 'VIEW BAG', run: () => callTool('view_cart', {}, 'web').catch(() => {}) });
         break;
       }
       renderCart(v);

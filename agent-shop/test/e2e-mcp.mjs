@@ -78,11 +78,19 @@ try {
   check('in-my-size search returns only items in stock in the profile size', sized.products.length > 0 && sized.products.every((p) => p.yourSize?.inStock === true), `${sized.products.length} items, e.g. ${sized.products[0]?.yourSize?.matched ?? '?'} (${sized.products[0]?.yourSize?.matchType ?? 'exact'})`);
   const filtered = parse(await client.callTool({ name: 'search_products', arguments: { query: "men's pants", limit: 10, max_price: 250, exclude_words: ['jogging'], sort: 'price_asc' } }));
   check('price cap + exclude words + sort respected', filtered.products.every((p) => p.price <= 25000 && !/jogging/i.test(p.name)) && filtered.products.every((p, i, a) => i === 0 || a[i - 1].price <= p.price), `${filtered.products.length} items, filters: ${filtered.appliedFilters.join(' · ')}`);
+  check('filters scan the whole category and report paging', filtered.scanned > 10 && typeof filtered.matchedAfterFilters === 'number' && typeof filtered.hasMore === 'boolean' && (!filtered.hasMore || filtered.nextOffset === 10), `scanned ${filtered.scanned}, matched ${filtered.matchedAfterFilters}, hasMore ${filtered.hasMore}`);
+  check('next-step choices always fit ask_shopper (2-5)', filtered.nextStepChoices?.length >= 2 && filtered.nextStepChoices.length <= 5, filtered.nextStepChoices?.join(' / '));
+  check('family codes come translated', filtered.products.every((p) => typeof p.familyEn === 'string' && p.familyEn === p.familyEn.toLowerCase()), filtered.products[0]?.familyEn);
+  if (filtered.hasMore) {
+    const page2 = parse(await client.callTool({ name: 'search_products', arguments: { query: "men's pants", limit: 10, max_price: 250, exclude_words: ['jogging'], sort: 'price_asc', offset: filtered.nextOffset } }));
+    check('offset pages to the next batch of the same sorted set', page2.products.length > 0 && page2.products.every((p) => p.price >= filtered.products[filtered.products.length - 1].price) && !page2.products.some((p) => filtered.products.some((q) => q.id === p.id)), `${page2.products.length} more`);
+  }
 
   console.log('\n— find_similar (lateral navigation)');
   const similar = parse(await client.callTool({ name: 'find_similar', arguments: { product_id: p0.id, limit: 6 } }));
   check('similar items found for the anchor', similar.products.length > 0, `${similar.products.length} similar to “${similar.anchor.name}”`);
   check('anchor excluded from its own results', similar.products.every((s) => s.id !== similar.anchor.id));
+  check('similar result says what is on screen and offers tappable next steps', similar.onScreen === true && typeof similar.humanSees === 'string' && similar.nextStepChoices?.length >= 2 && similar.nextStepChoices.every((c) => c.length <= 40), similar.nextStepChoices?.join(' / '));
 
   console.log('\n— shopper signals: love → read back');
   const lovedRes = parse(await client.callTool({ name: 'love_item', arguments: { product_id: p0.id } }));
@@ -166,6 +174,21 @@ try {
   check('removes from bag', removed.ok === true && removed.removed === 1, `bag now ${removed.bag.count}`);
   const oos = parse(await client.callTool({ name: 'add_to_cart', arguments: { product_id: p0.id, size: 'NOSUCHSIZE' } }));
   check('structured failure on impossible size', oos.ok === false && typeof oos.code === 'string', oos.code);
+  // A colourway id (what search rows carry) means THAT colour, not the first one.
+  const cw = detail.colorDetails.find((c) => c.productId && c.productId !== detail.id);
+  if (cw) {
+    const byCw = parse(await client.callTool({ name: 'add_to_cart', arguments: { product_id: cw.productId } }));
+    check('a colourway id resolves to that colour (never silently the first one)', byCw.requestedId === cw.productId && byCw.productId === detail.id && (byCw.ok ? byCw.added.color === cw.name && byCw.colorRequested === cw.name : byCw.code === 'ITEM_OUT_OF_STOCK' ? byCw.colorRequested === cw.name : true), `${byCw.ok ? `added ${byCw.added.color}` : byCw.code} (${byCw.colorResolved ?? ''})`);
+    if (byCw.ok) await client.callTool({ name: 'remove_from_cart', arguments: { cart_id: byCw.added.cartId } });
+  }
+  // The human's own bag line is not the agent's to sweep away by product id.
+  const humanAdd = await fetch(`${BASE}/api/tools/add_to_cart`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-channel': 'web' }, body: JSON.stringify({ product_id: p0.id }) }).then((r) => r.json());
+  if (humanAdd.ok && humanAdd.result?.ok) {
+    const refused = parse(await client.callTool({ name: 'remove_from_cart', arguments: { product_id: p0.id } }));
+    check('agent cannot remove a human-added line by product_id', refused.ok === false && refused.code === 'HUMAN_ADDED_LINE' && refused.lines?.[0]?.cartId, refused.code);
+    const byId = parse(await client.callTool({ name: 'remove_from_cart', arguments: { cart_id: humanAdd.result.added.cartId } }));
+    check('…but can with the explicit cart_id, and says what the human sees', byId.ok === true && byId.removed === 1 && typeof byId.onScreen === 'boolean' && typeof byId.humanSees === 'string', byId.humanSees?.slice(0, 50));
+  }
 
   console.log('\n— sale hunt (on_sale_only)');
   const sale = parse(await client.callTool({ name: 'search_products', arguments: { query: 'man sale', section: 'MAN', limit: 10, on_sale_only: true } }));

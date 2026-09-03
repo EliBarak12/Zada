@@ -1,6 +1,6 @@
 // The shared agent tool layer — single source of truth.
 //
-// The same eight tools are exposed on every surface:
+// The same sixteen tools are exposed on every surface:
 //   • in-page WebMCP tools (navigator.modelContext) registered by web/app.js,
 //     whose handlers POST to /api/tools/:name
 //   • the remote MCP endpoint (/mcp, streamable HTTP) for ChatGPT,
@@ -15,7 +15,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import * as zara from './zara.mjs';
 import { findReviews } from './reviews.mjs';
 import { recordPrice, priceReport } from './prices.mjs';
-import { addItem, removeItem, cartSummary } from './cart.mjs';
+import { addItem, removeItem, cartSummary, cartItems } from './cart.mjs';
 import { recordSignal, recordLocation, setLoved, lovedItems, shopperSummary, shopperContext, currentLocation, detectNudge } from './signals.mjs';
 import { saveFindings, findingsFor } from './notes.mjs';
 import { ask, waitForAnswer, getQuestion, publicView, pendingQuestions } from './questions.mjs';
@@ -73,6 +73,29 @@ function familyKind(family = '') {
   return 'tops';
 }
 
+// The catalog's family codes, in English, so agents never surface "PANTALON".
+const FAMILY_EN = [
+  [/SOBRECAMISA/, 'overshirt'], [/CAMISETA/, 't-shirt'], [/CAMISA/, 'shirt'], [/CAMISON/, 'nightdress'],
+  [/PANTALON/, 'trousers'], [/VAQUERO|JEAN/, 'jeans'], [/BERMUDA|SHORT/, 'shorts'], [/CHINO/, 'chinos'],
+  [/SUDADERA/, 'sweatshirt'], [/JERSEY|PUNTO/, 'knitwear'], [/CARDIGAN/, 'cardigan'], [/POLO/, 'polo shirt'],
+  [/CAZADORA/, 'jacket'], [/CHAQUETA/, 'jacket'], [/BLAZER|AMERICANA/, 'blazer'], [/ABRIGO/, 'coat'],
+  [/TRENCH|GABARDINA/, 'trench coat'], [/PARKA/, 'parka'], [/ANORAK/, 'anorak'], [/CHALECO/, 'waistcoat'],
+  [/TRAJE/, 'suit'], [/FALDA/, 'skirt'], [/VESTIDO/, 'dress'], [/MONO/, 'jumpsuit'], [/BODY/, 'bodysuit'], [/TOP/, 'top'],
+  [/BAÑADOR|BANADOR|BIKINI/, 'swimwear'], [/PIJAMA/, 'pyjamas'], [/ROPA INTERIOR|BOXER|CALZONCILLO/, 'underwear'],
+  [/CALCETIN/, 'socks'], [/DEPORTIVO|SNEAKER|TRAINER|ZAPATILLA/, 'trainers'], [/MOCASIN|LOAFER/, 'loafers'],
+  [/BOTA|BOOT/, 'boots'], [/SANDALIA/, 'sandals'], [/CHANCLA/, 'flip-flops'], [/ALPARGATA|ESPADRIL/, 'espadrilles'],
+  [/ZAPATO|CALZADO|SHOE/, 'shoes'], [/CINTURON/, 'belt'], [/BOLSO/, 'bag'], [/MOCHILA/, 'backpack'], [/CARTERA/, 'wallet'],
+  [/GORRA/, 'cap'], [/GORRO/, 'beanie'], [/SOMBRERO/, 'hat'], [/BUFANDA/, 'scarf'], [/GUANTE/, 'gloves'], [/CORBATA/, 'tie'],
+  [/GAFAS/, 'sunglasses'], [/PERFUME|FRAGANCIA/, 'fragrance'], [/ACCESORIO/, 'accessory'],
+];
+export function familyEn(family = '') {
+  const f = String(family || '').toUpperCase();
+  if (!f) return null;
+  for (const [re, en] of FAMILY_EN) if (re.test(f)) return en;
+  return f.toLowerCase();
+}
+const PRICE_UNIT = 'price/oldPrice are minor units (1/100 of the currency); priceText is the display value; min_price/max_price arguments are whole units';
+
 function sizeForFamily(profile, family = '') {
   const kind = familyKind(family);
   if (kind === 'bottoms') return profile.bottoms ?? profile.tops ?? null;
@@ -106,7 +129,9 @@ function equivalents(want, kind) {
   return out;
 }
 
-function markSizes(detail, wantedSize) {
+// flag: 'isYourSize' (the saved profile) or 'isChecked' (a size the agent asked
+// about explicitly) — the chips in the store are labelled accordingly.
+function markSizes(detail, wantedSize, flag = 'isYourSize') {
   if (!wantedSize) return { detail, match: null };
   const kind = familyKind(detail.family);
   const cands = equivalents(wantedSize, kind);
@@ -116,7 +141,7 @@ function markSizes(detail, wantedSize) {
     for (const c of detail.colorDetails ?? []) {
       for (const s of c.sizes ?? []) {
         if (norm(s.name) === cand.label) {
-          s.isYourSize = true;
+          s[flag] = true;
           matches.push({ color: c.name, size: s.name, availability: s.availability });
         }
       }
@@ -176,6 +201,7 @@ async function fullDetail(productId) {
   const d = zara.detailView(p);
   recordPrice(d.id, d.price, d.oldPrice, d.name);
   d.agentFindings = findingsFor(d.id); // what the agent wrote onto this product, if anything
+  d.familyEn = familyEn(d.family);
   // Search rows carry colourway ids; details answer with the parent. Keep both
   // and remember which colour was asked for, so the store opens THAT colour.
   d.requestedId = Number(productId);
@@ -210,6 +236,8 @@ function slimProduct(d) {
   }
   return {
     ...d,
+    familyEn: familyEn(d.family),
+    requestedColor: d.colorDetails?.[d.selectedColorIndex ?? 0]?.name ?? null,
     images: (d.images ?? []).slice(0, 3),
     sizes: Object.values(sizes),
     colorDetails: (d.colorDetails ?? []).map((c) => ({ id: c.id, productId: c.productId ?? null, name: c.name, hex: c.hex, priceText: c.priceText, image: c.images?.[0] ?? null, sizes: c.sizes })),
@@ -220,7 +248,13 @@ const COLOR_WORDS = new Set(['black', 'white', 'beige', 'navy', 'blue', 'grey', 
 
 // The next-step choices a human could tap: only filters NOT yet applied, and
 // when nothing passed, the filters to relax.
-function nextChoices(args, products) {
+// ask_shopper needs 2-5 choices, so the list is always at least two long.
+function atLeastTwo(list, fillers) {
+  const out = [...new Set(list)];
+  for (const f of fillers) { if (out.length >= 2) break; if (!out.includes(f)) out.push(f); }
+  return out.slice(0, 4);
+}
+function nextChoices(args, products, { hasMore = false } = {}) {
   const profile = readProfile();
   const hasProfile = Boolean(profile.tops || profile.bottoms || profile.shoes);
   if (!products.length) {
@@ -229,17 +263,18 @@ function nextChoices(args, products) {
     if (args.size || args.in_my_size_only) relax.push('Any size');
     if (args.on_sale_only || args.min_discount_pct != null) relax.push('Full price too');
     if (args.colors?.length) relax.push('Any colour');
+    if (args.include_words?.length || args.exclude_words?.length) relax.push('Loosen the words');
     relax.push('A different style');
-    return relax.slice(0, 4);
+    return atLeastTwo(relax, ['Search something else']);
   }
   const c = [];
   if (hasProfile && !args.in_my_size_only && !args.size) c.push('Only my size');
-  if (!hasProfile && !args.size) c.push('Filter by my size');
+  if (!hasProfile && !args.size && !args.in_my_size_only) c.push('Tell me your size');
   if (args.max_price == null) c.push('Cheaper');
   if (!args.on_sale_only && products.some((p) => p.onSale)) c.push('On sale only');
-  if (products.length >= (args.limit ?? 24)) c.push('Show me more');
+  if (hasMore) c.push('Show me more');
   c.push('A different style');
-  return c.slice(0, 4);
+  return atLeastTwo(c, ['Show me more', 'Cheaper']);
 }
 
 function answerResult(q, a) {
@@ -283,15 +318,21 @@ export const TOOLS = [
       include_words: z.array(z.string()).optional().describe('Product name must contain all of these words, e.g. ["linen"]'),
       exclude_words: z.array(z.string()).optional().describe('Drop items whose name contains any of these words, e.g. ["jogging"]'),
       size: z.string().optional().describe('Only items with THIS size in live stock (e.g. "M", "42"). Checks real per-size availability.'),
-      in_my_size_only: z.boolean().optional().describe("Only items in live stock in the human's saved size (size systems converted automatically)"),
-      sort: z.enum(['relevance', 'price_asc', 'price_desc', 'discount']).optional().describe('Result order (default relevance)'),
+      in_my_size_only: z.boolean().optional().describe("Only items in live stock in the human's saved size (size systems converted automatically). Costs a live per-size check of up to 36 candidates per call (a few seconds); the result says how many were checked and, via hasMore/nextOffset, whether to call again with offset."),
+      sort: z.enum(['relevance', 'price_asc', 'price_desc', 'discount']).optional().describe('Result order (default relevance) — applied to every match, not just the first page'),
+      offset: z.number().int().min(0).max(2000).optional().describe('Skip this many matches (after filters and sort) — paging: use nextOffset from the previous result'),
     }),
     async run(args) {
       const limit = args.limit ?? 24;
+      const offset = args.offset ?? 0;
+      const SIZE_CHECK_MAX = 36; // live per-size stock checks per call (latency bound)
+      const SCAN_MAX = 400;      // catalogue rows examined when filtering, sorting or paging
       const sizeFilter = args.size ?? (args.in_my_size_only ? sizeForFamily(readProfile(), '') : null);
       const needsPool = Boolean(args.min_price != null || args.max_price != null || args.on_sale_only || args.min_discount_pct != null || args.colors?.length || args.include_words?.length || args.exclude_words?.length || sizeFilter || args.in_my_size_only);
-      const res = await zara.searchProducts(args.query, { section: args.section, limit: needsPool ? Math.min(limit * 3, 60) : limit });
+      const needsScan = needsPool || offset > 0 || (args.sort && args.sort !== 'relevance');
+      const res = await zara.searchProducts(args.query, { section: args.section, limit: needsScan ? SCAN_MAX : limit });
       let products = res.products;
+      const scanned = products.length;
 
       const applied = [];
       // Colour words in a natural-language query ("beige trousers") become a
@@ -323,39 +364,67 @@ export const TOOLS = [
         applied.push(`excl: ${args.exclude_words.join(',')}`);
       }
 
-      let sizeNote;
-      if (args.in_my_size_only || args.size) {
-        const profile = readProfile();
-        if (args.in_my_size_only && !profile.tops && !profile.bottoms && !profile.shoes) {
-          return { error: 'in_my_size_only needs a saved size profile — call set_my_sizes first (or pass an explicit size).', query: args.query, products: [] };
-        }
-        await annotateMySize(products, profile, args.size ?? null);
-        products = filterMySize(products, limit);
-        applied.push(args.size ? `size ${args.size} in stock` : 'in your size');
-        sizeNote = 'Each product carries yourSize {size, matched, inStock} verified against live per-size stock.';
-      }
-
+      // Sort the whole filtered set first, so paging and the size check walk
+      // it in the order the human asked for (cheapest first, biggest markdown…).
       if (args.sort === 'price_asc') products.sort((a, b) => (a.price ?? 1e12) - (b.price ?? 1e12));
       if (args.sort === 'price_desc') products.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
       if (args.sort === 'discount') products.sort((a, b) => (b.discountPct ?? 0) - (a.discountPct ?? 0));
 
-      products = products.slice(0, limit);
+      const matchedAfterFilters = products.length; // before the size check and paging
+      if (offset) products = products.slice(offset);
+
+      let sizeNote;
+      let sizeChecked = 0;
+      let nextOffset = null;
+      if (args.in_my_size_only || args.size) {
+        const profile = readProfile();
+        if (args.in_my_size_only && !profile.tops && !profile.bottoms && !profile.shoes) {
+          return {
+            error: 'in_my_size_only needs a saved size profile — call set_my_sizes first (or pass an explicit size).',
+            query: args.query, products: [], returned: 0,
+            nextStepChoices: ['Tell me your size', 'Any size'],
+          };
+        }
+        sizeChecked = Math.min(products.length, SIZE_CHECK_MAX);
+        const unchecked = products.length - sizeChecked;
+        await annotateMySize(products, profile, args.size ?? null);
+        products = filterMySize(products.slice(0, sizeChecked), limit);
+        applied.push(args.size ? `size ${args.size} in stock` : 'in your size');
+        sizeNote = `Each product carries yourSize {size, matched, inStock} verified against live per-size stock (${sizeChecked} candidates checked this call).`;
+        if (unchecked > 0) {
+          nextOffset = offset + sizeChecked;
+          sizeNote += ` ${unchecked} more matched the other filters but were not size-checked yet — call again with offset: ${nextOffset} for the next batch.`;
+        }
+      } else {
+        if (products.length > limit) nextOffset = offset + limit;
+        products = products.slice(0, limit);
+      }
+      const hasMore = nextOffset != null;
       for (const p of products) recordPrice(p.id, p.price, p.oldPrice, p.name);
+      products = products.map((p) => ({ ...p, familyEn: familyEn(p.family) }));
       const out = {
         ...res,
         products,
         returned: products.length,
+        offset: offset || undefined,
+        scanned,
         matchedBeforeFilters: res.total ?? null,
+        matchedAfterFilters,
+        hasMore,
+        nextOffset: hasMore ? nextOffset : undefined,
         appliedFilters: applied,
         inferredFilters: inferred.length ? inferred : undefined,
         note: !products.length && res.products.length
-          ? `${res.products.length} items matched “${args.query}” but none passed: ${applied.join(' · ') || 'the filters'}. Relax one, or ask the human which to drop.`
+          ? (matchedAfterFilters > offset && sizeChecked
+            ? `${matchedAfterFilters} items matched “${args.query}” and the filters, but none of the ${sizeChecked} size-checked ones is in stock in that size.${hasMore ? ` Try offset: ${nextOffset} for the next batch, or` : ''} relax a filter.`
+            : `${res.products.length} items matched “${args.query}” but none passed: ${applied.join(' · ') || 'the filters'}. Relax one, or ask the human which to drop.`)
           : undefined,
         sizeNote,
         idNote: 'Result ids are colourway ids; get_product answers with the parent id (plus requestedId). Use the id you were given — every tool accepts either.',
         catalogLanguage: 'en',
         currency: zara.currency(),
-        nextStepChoices: nextChoices(args, products),
+        priceUnit: PRICE_UNIT,
+        nextStepChoices: nextChoices(args, products, { hasMore }),
       };
       emit({ tool: 'search_products', args, view: { kind: 'grid', ...out, requery: { query: args.query, section: res.section, in_my_size_only: Boolean(args.in_my_size_only) } }, summary: `Searched “${args.query}”${applied.length ? ` [${applied.join(' · ')}]` : ''} → ${products.length} items (${res.section})` });
       return out;
@@ -377,7 +446,7 @@ export const TOOLS = [
       const { match } = markSizes(d, yourSize);
       const out = { ...d, yourSize: match };
       emit({ tool: 'get_product', args, view: { kind: 'detail', product: out }, summary: `Opened “${d.name}” (${d.priceText})` });
-      return { ...slimProduct(out), onScreen: true, humanSees: 'the full product view' };
+      return { ...slimProduct(out), priceUnit: PRICE_UNIT, onScreen: true, humanSees: `the full product view${d.requestedId !== d.id ? `, opened on the ${d.colorDetails?.[d.selectedColorIndex]?.name ?? 'requested'} colourway` : ''}` };
     },
   },
   {
@@ -394,18 +463,22 @@ export const TOOLS = [
       const d = await fullDetail(args.product_id);
       const profile = readProfile();
       const size = args.size ?? sizeForFamily(profile, d.family);
+      const scr = screenState(d.id);
       if (!size) {
+        const labels = [...new Set(d.colorDetails.flatMap((c) => (c.sizes ?? []).filter((s) => s.availability === 'in_stock' || s.availability === 'low_on_stock').map((s) => s.name)))];
         return {
-          product: d.name,
-          error: 'No size given and no saved size profile. Ask the human for their size or call set_my_sizes first.',
+          product: d.name, productId: d.id, requestedId: d.requestedId,
+          error: 'No size given and no saved size profile. Ask the human for their size in the store (ask_shopper with the size labels below), then call set_my_sizes so it sticks.',
+          sizeLabels: labels,
           availableSizes: d.colorDetails.map((c) => ({ color: c.name, sizes: c.sizes })),
+          ...scr.fields('nothing new — no size was checked'),
         };
       }
-      const { match } = markSizes(d, size);
-      const out = { product: d.name, productId: d.id, checked: size, usingSavedProfile: args.size == null, ...match };
-      const scr = screenState(d.id);
+      const explicit = args.size != null;
+      const { match } = markSizes(d, size, explicit ? 'isChecked' : 'isYourSize');
+      const out = { product: d.name, productId: d.id, requestedId: d.requestedId, checked: size, usingSavedProfile: !explicit, ...match };
       emit({ tool: 'check_size_availability', args, view: { kind: 'size', navigate: scr.onScreen, product: d, match: out }, summary: `Size ${size} on “${d.name}”: ${out.inStockAnywhere ? 'available' : 'not available'}` });
-      return { ...out, ...scr.fields('the size chips on the open product, your size flagged') };
+      return { ...out, ...scr.fields(`the size chips on the open product, ${explicit ? `“${size}” flagged CHECKED` : 'your size flagged YOURS'}`) };
     },
   },
   {
@@ -440,16 +513,25 @@ export const TOOLS = [
     async run(args) {
       let name = args.query;
       let pid = args.product_id ?? null;
-      if (pid && !name) {
+      let requestedId = pid;
+      if (pid) {
+        // Colourway ids resolve to the parent product — that is the id the
+        // store keys panels and the human's current location by.
         const d = await fullDetail(pid);
-        name = d.name;
+        pid = d.id;
+        name ||= d.name;
       }
       if (!name) throw new Error('Give either product_id or query.');
       const out = await findReviews(name);
+      const okSources = (out.sources ?? []).filter((s) => s.ok);
+      const coverage = `${okSources.length} of ${out.sources?.length ?? 0} server-side sources reachable (${(out.sources ?? []).map((s) => `${s.source}: ${s.ok ? `${s.count} hit${s.count === 1 ? '' : 's'}` : 'blocked'}`).join(', ')}); ${out.results?.length ?? 0} usable mention${out.results?.length === 1 ? '' : 's'} after the relevance gate.`;
       const scr = pid ? screenState(pid) : { onScreen: true, fields: (shown) => ({ onScreen: true, humanSees: shown }) };
       emit({ tool: 'find_reviews', args, view: { kind: 'reviews', navigate: scr.onScreen, productId: pid, productName: name, ...out }, summary: `Reviews for “${name}”: ${out.results.length} mentions found` });
       return {
         productName: name,
+        productId: pid ?? undefined,
+        requestedId: requestedId ?? undefined,
+        coverage,
         ...out,
         ...scr.fields('the “What people say” panel on the open product'),
         agentInstructions: `${out.agentInstructions ?? ''} When you have a conclusion (and a product_id), call post_findings({ product_id, verdict, sizing, recommended_size, findings }) so it appears on the product page — the human is looking at the store, not the chat.`.trim(),
@@ -469,8 +551,8 @@ export const TOOLS = [
       const d = await fullDetail(args.product_id);
       const report = priceReport(d.id, d.price, d.oldPrice);
       const out = {
-        product: d.name, productId: d.id,
-        current: d.price, currentText: d.priceText,
+        product: d.name, productId: d.id, requestedId: d.requestedId,
+        current: d.price, currentText: d.priceText, priceUnit: PRICE_UNIT,
         listedOldPrice: d.oldPrice, listedOldPriceText: d.oldPriceText,
         onSale: d.onSale, discountPct: d.discountPct,
         ...report, currency: zara.currency(),
@@ -502,10 +584,35 @@ export const TOOLS = [
         await annotateMySize(products, readProfile());
         products = filterMySize(products, limit);
       }
-      products = products.slice(0, limit);
+      products = products.slice(0, limit).map((p) => ({ ...p, familyEn: familyEn(p.family) }));
       for (const p of products) recordPrice(p.id, p.price, p.oldPrice, p.name);
+      const applied = [];
+      if (args.max_price != null) applied.push(`≤${args.max_price}`);
+      if (args.in_my_size_only) applied.push('in your size');
+      // The store renders this either as the "More like this" row on the open
+      // product page or, when the human is elsewhere, as a results grid.
+      const cur = currentLocation();
+      const onAnchor = cur.view === 'product' && cur.productId === res.anchor.id;
+      const profile = readProfile();
+      const hasProfile = Boolean(profile.tops || profile.bottoms || profile.shoes);
+      const short = (n) => (n.length > 40 ? `${n.slice(0, 37).trimEnd()}…` : n);
+      const choices = products.slice(0, 3).map((p) => short(p.name));
+      if (hasProfile && !args.in_my_size_only) choices.push('Only my size');
       emit({ tool: 'find_similar', args, view: { kind: 'similar', productId: res.anchor.id, anchorName: res.anchor.name, products }, summary: `Found ${products.length} items similar to “${res.anchor.name}”${args.in_my_size_only ? ' (your size only)' : ''}` });
-      return { anchor: res.anchor, products, currency: zara.currency() };
+      return {
+        anchor: { ...res.anchor, requestedId: args.product_id },
+        products,
+        returned: products.length,
+        appliedFilters: applied.length ? applied : undefined,
+        note: products.length ? undefined : `Nothing similar to “${res.anchor.name}”${applied.length ? ` passed: ${applied.join(' · ')}` : ' in the live catalog'} — relax a filter or search wider.`,
+        currency: zara.currency(),
+        priceUnit: PRICE_UNIT,
+        onScreen: true,
+        humanSees: products.length
+          ? (onAnchor ? 'the “More like this” row on the open product page' : `a results grid titled “similar to ${res.anchor.name}”`)
+          : 'nothing new — the screen did not change',
+        nextStepChoices: atLeastTwo(choices, ['Show me more', 'A different style']),
+      };
     },
   },
   {
@@ -521,8 +628,9 @@ export const TOOLS = [
     async run(args) {
       const d = await fullDetail(args.product_id);
       const love = args.love ?? true;
+      const cw = d.colorDetails[d.selectedColorIndex ?? 0] ?? d.colorDetails[0];
       const loved = setLoved(
-        { productId: d.id, name: d.name, price: d.price, priceText: d.priceText, family: d.family, section: d.section, color: d.colorDetails[0]?.name ?? null, image: d.images[0] ?? null, url: d.url },
+        { productId: d.id, name: d.name, price: d.price, priceText: d.priceText, family: d.family, section: d.section, color: cw?.name ?? null, image: cw?.images?.[0] ?? d.images[0] ?? null, url: d.url },
         love,
         currentChannel(),
       );
@@ -532,10 +640,11 @@ export const TOOLS = [
       const GENERIC = new Set(['WITH', 'AND', 'THE', 'ZW', 'COLLECTION']);
       const parameters = {
         styleWords: d.name.toUpperCase().split(/[^A-Z-]+/).filter((w) => w.length >= 4 && !GENERIC.has(w)).map((w) => w.toLowerCase()),
-        color: d.colorDetails[0]?.name ?? null,
+        color: cw?.name ?? null,
         price: d.price,
         priceText: d.priceText,
         family: d.family,
+        familyEn: familyEn(d.family),
         section: d.section,
       };
       if (love && currentChannel() === 'web') {
@@ -543,7 +652,7 @@ export const TOOLS = [
         emit({ channel: 'shop', tool: 'nudge', view: { kind: 'nudge', mode: 'similar', productId: d.id, theme: d.name.toLowerCase() }, summary: `Offered similar items to the loved “${d.name}”` });
       }
       return {
-        ok: true, loved: love, productId: d.id, product: d.name, totalLoved: loved.length,
+        ok: true, loved: love, productId: d.id, requestedId: d.requestedId, product: d.name, totalLoved: loved.length,
         parameters,
         suggestion: love
           ? `Strong intent signal. Offer to show similar pieces right now — call find_similar({ product_id: ${d.id}, in_my_size_only: true }) and present what comes back; combine with the parameters above (style words, color, price band) when searching wider.`
@@ -594,14 +703,22 @@ export const TOOLS = [
         };
       }
       let colors = d.colorDetails;
+      let colorResolved = 'first colour with the size in stock';
+      const requestedColourway = d.requestedId !== d.id ? d.colorDetails[d.selectedColorIndex] : null;
       if (args.color) {
         colors = colors.filter((c) => (c.name ?? '').toLowerCase().includes(args.color.toLowerCase()));
         if (!colors.length) {
           return {
-            ok: false, code: 'COLOR_NOT_FOUND', changed: false,
+            ok: false, code: 'COLOR_NOT_FOUND', changed: false, productId: d.id, requestedId: d.requestedId,
             message: `No color matching “${args.color}” — this product comes in: ${d.colorDetails.map((c) => c.name).join(', ')}.`,
           };
         }
+        colorResolved = `matched “${args.color}”`;
+      } else if (requestedColourway) {
+        // A colourway id was passed (search rows carry them): that colour is
+        // what the human saw — never silently swap to another one.
+        colors = [requestedColourway];
+        colorResolved = `the ${requestedColourway.name} colourway of id ${d.requestedId}`;
       }
       // Find the size across candidate labels (exact first, then equivalents),
       // preferring a color where it is actually in stock.
@@ -624,15 +741,19 @@ export const TOOLS = [
       }
       if (!found) {
         return {
-          ok: false, code: 'SIZE_NOT_FOUND', changed: false,
+          ok: false, code: 'SIZE_NOT_FOUND', changed: false, productId: d.id, requestedId: d.requestedId,
           message: `“${d.name}” has no size matching “${want}”. Available: ${[...new Set(colors.flatMap((c) => c.sizes.map((s) => s.name)))].join(', ')}.`,
         };
       }
       if (found.size.availability === 'out_of_stock' || found.size.availability === 'coming_soon') {
         const inStock = colors.flatMap((c) => c.sizes.filter((s) => s.availability === 'in_stock').map((s) => `${s.name} (${c.name})`));
+        const otherColours = colors.length < d.colorDetails.length
+          ? d.colorDetails.filter((c) => !colors.includes(c)).flatMap((c) => c.sizes.filter((s) => norm(s.name) === norm(found.size.name) && (s.availability === 'in_stock' || s.availability === 'low_on_stock')).map(() => c.name))
+          : [];
         return {
-          ok: false, code: 'ITEM_OUT_OF_STOCK', changed: false,
-          message: `Size ${found.size.name} of “${d.name}” is ${found.size.availability}. In stock instead: ${inStock.join(', ') || 'nothing in this color set'}.`,
+          ok: false, code: 'ITEM_OUT_OF_STOCK', changed: false, productId: d.id, requestedId: d.requestedId,
+          colorRequested: args.color ?? requestedColourway?.name ?? null,
+          message: `Size ${found.size.name} of “${d.name}” is ${found.size.availability} in ${found.color.name ?? 'this colour'}. In stock instead: ${inStock.join(', ') || 'nothing in this colour'}${otherColours.length ? `; size ${found.size.name} is in stock in ${otherColours.join(', ')} (pass color to take it)` : ''}.`,
         };
       }
       const item = addItem({
@@ -647,6 +768,8 @@ export const TOOLS = [
       const summary = cartSummary();
       const out = {
         ok: true, changed: true, added: item,
+        productId: d.id, requestedId: d.requestedId,
+        colorRequested: args.color ?? requestedColourway?.name ?? null, colorResolved,
         lowStock: found.size.availability === 'low_on_stock' || undefined,
         note: matchType && matchType !== 'exact' ? `Matched via ${matchType}.` : undefined,
         bag: { count: summary.count, subtotal: summary.subtotal, subtotalText: zara.formatPrice(summary.subtotal) },
@@ -703,26 +826,54 @@ export const TOOLS = [
   {
     name: 'remove_from_cart',
     title: 'Remove from the bag',
-    description: 'Remove an item from the shopping bag by cartId (from view_cart) or by product_id.',
+    description: 'Remove a line from the shopping bag by cartId (from view_cart) or by product_id. By product_id an agent only removes lines it added itself; a line the human added needs its cart_id (a deliberate act). Never moves the human’s screen — the bag simply updates.',
     readOnly: false,
     schema: z.object({
       cart_id: z.string().optional().describe('cartId of the bag line from view_cart'),
-      product_id: z.number().int().optional().describe('Remove all bag lines of this product'),
+      product_id: z.number().int().optional().describe('Remove the bag lines of this product (parent or colourway id) that were added by an agent'),
     }),
     async run(args) {
       if (!args.cart_id && !args.product_id) throw new Error('Give cart_id or product_id.');
-      const removed = removeItem({ cartId: args.cart_id, productId: args.product_id });
-      recordSignal({ type: 'bag_remove', channel: currentChannel(), productId: args.product_id ?? null, name: null, cartId: args.cart_id ?? null });
+      const human = currentChannel() === 'web';
+      let productId = args.product_id ?? null;
+      const before = cartItems();
+      if (productId && !before.some((i) => i.productId === productId)) {
+        // Colourway id → parent id (bag lines are keyed by the parent).
+        try { productId = (await fullDetail(productId)).id; } catch { /* unknown id: nothing matches below */ }
+      }
+      const target = before.filter((i) => (args.cart_id ? i.cartId === args.cart_id : i.productId === productId));
+      if (!target.length) {
+        return { ok: false, code: 'NOT_IN_BAG', changed: false, removed: 0, message: `No bag line matches ${args.cart_id ? `cart_id ${args.cart_id}` : `product ${args.product_id}`}. Call view_cart for the current lines.`, bag: { count: cartSummary().count } };
+      }
+      const humanLines = human || args.cart_id ? [] : target.filter((i) => i.addedBy !== 'agent');
+      if (humanLines.length === target.length) {
+        return {
+          ok: false, code: 'HUMAN_ADDED_LINE', changed: false, removed: 0,
+          message: 'These lines were added by the human, not by an agent. Removing them by product_id is refused — ask them in the store (ask_shopper) and pass the exact cart_id if they say yes.',
+          lines: humanLines.map((i) => ({ cartId: i.cartId, name: i.name, size: i.size, color: i.color, addedBy: i.addedBy })),
+        };
+      }
+      const removed = removeItem({ cartId: args.cart_id, productId, onlyAddedBy: human || args.cart_id ? null : 'agent' });
+      const gone = target.filter((i) => !humanLines.includes(i));
+      recordSignal({ type: 'bag_remove', channel: currentChannel(), productId: gone[0]?.productId ?? productId, name: gone[0]?.name ?? null, cartId: args.cart_id ?? null });
       const summary = cartSummary();
-      emit({ tool: 'remove_from_cart', args, view: { kind: 'cart', ...summary, currency: zara.currency() }, summary: `Removed ${removed} item(s) — bag now has ${summary.count}` });
-      return { ok: true, changed: removed > 0, removed, bag: { count: summary.count, subtotal: summary.subtotal, subtotalText: zara.formatPrice(summary.subtotal) } };
+      const inBag = currentLocation().view === 'bag';
+      emit({ tool: 'remove_from_cart', args, view: { kind: 'cart', navigate: false, removed: gone.map((i) => ({ name: i.name, size: i.size, color: i.color, addedBy: i.addedBy })), removedBy: human ? 'you' : 'agent', ...summary, currency: zara.currency() }, summary: `Removed ${removed} item(s) — bag now has ${summary.count}` });
+      return {
+        ok: true, changed: removed > 0, removed,
+        removedLines: gone.map((i) => ({ cartId: i.cartId, name: i.name, size: i.size, color: i.color })),
+        skippedHumanLines: humanLines.length ? humanLines.map((i) => ({ cartId: i.cartId, name: i.name, size: i.size })) : undefined,
+        bag: { count: summary.count, subtotal: summary.subtotal, subtotalText: zara.formatPrice(summary.subtotal) },
+        onScreen: inBag,
+        humanSees: inBag ? 'the bag, with the line gone' : 'the bag count ticks down and a small “removed from your bag” notice — the human stays where they are',
+      };
     },
   },
   {
     name: 'post_findings',
     title: 'Write your verdict onto the product page',
     description:
-      'Publish what YOU concluded about a product — after find_reviews plus your own web search — so it appears on the product page in the store as a “Your agent found” panel: a one-line verdict, fit/quality/sizing facts, an optional recommended size (that size chip gets an “AGENT: TAKE THIS” badge and is pre-selected for the bag), and the sources you actually read. The human is looking at the store, not the chat: put the conclusion here, then say one line in chat. Only cite pages you opened.',
+      'Publish what YOU concluded about a product — after find_reviews plus your own web search — so it appears on the product page in the store as a “Your agent found” panel: a one-line verdict, fit/quality/sizing facts, an optional recommended size (that size chip is flagged as your pick and pre-selected for the bag), and the sources you actually read. The human is looking at the store, not the chat: put the conclusion here, then say one line in chat. Only cite pages you opened.',
     readOnly: false,
     schema: z.object({
       product_id: z.number().int().describe('Product id'),
@@ -761,7 +912,7 @@ export const TOOLS = [
       const scr = screenState(d.id);
       emit({ tool: 'post_findings', args, view: { kind: 'agent_note', navigate: scr.onScreen, productId: d.id, productName: d.name, note }, summary: `Wrote a verdict on “${d.name}” (${note.findings.length} source${note.findings.length === 1 ? '' : 's'})` });
       return {
-        ok: true, productId: d.id, product: d.name,
+        ok: true, productId: d.id, requestedId: d.requestedId, product: d.name,
         shownOn: `the product page — “Your agent found” panel${recommendedSize ? `, size ${recommendedSize} pre-selected` : ''}`,
         ...scr.fields('the “Your agent found” panel, scrolled into view'),
         agentInstructions: scr.onScreen
@@ -820,6 +971,9 @@ export const TOOLS = [
         .filter((c) => !c.redirect)
         .filter((c) => !/GIFT CARD|STORES|DOWNLOAD|INFO|NEWSLETTER|CONTACT|PRESS|COMPANY|OFFICES|HELP|JOIN LIFE|ABOUT|EDITORIAL|STORE LOCATOR|VIEW ALL|PROCESS|POSTURES/i.test(c.path))
         .filter((c) => !/\d+ \d+ \d+/.test(c.name))
+        // Same-name nodes repeat across promo subtrees: keep the shallowest.
+        .sort((a, b) => (a.path.match(/>/g) ?? []).length - (b.path.match(/>/g) ?? []).length)
+        .filter((c, i, arr) => arr.findIndex((o) => o.name === c.name) === i)
         .map((c) => ({ id: c.id, name: c.name, path: c.path }))
         .slice(0, 80);
       return { section: args.section ?? 'MAN', categories: slim, note: 'Search by category NAME with search_products (e.g. "men linen shirts"); ids are informational.' };
@@ -837,8 +991,15 @@ const NEXT_STEP = {
     ? `Describe the top 3 in one line each, then offer the next step in the store: ask_shopper({ question: "How do you want to narrow it?", choices: ${JSON.stringify(r.nextStepChoices ?? ['Cheaper', 'A different style'])} }) — the human taps; do not list questions in chat.`
     : `Nothing passed the filters.${r.note ? ` ${r.note}` : ''} Offer: ask_shopper({ question: "Which should I relax?", choices: ${JSON.stringify(r.nextStepChoices ?? ['A different style'])} }).`,
   get_product: () => 'One line on what you see, then offer the next step in the store: ask_shopper({ question: "What do you want to know?", choices: ["Is it my size?", "Reviews", "Was it cheaper?", "Similar items"] }) — unless the human already asked for one of them; then just do it.',
-  find_similar: (r) => r.products?.length ? 'Offer: ask_shopper({ question: "Open one?", choices: [top 3 names…, "Only my size"] }) — a tap opens it.' : null,
-  check_size_availability: (r) => r.inStockAnywhere ? 'Offer: ask_shopper({ question: "Add it to the bag in that size?", choices: ["Yes", "Show similar first", "Not now"] }).' : 'Not in their size — offer: ask_shopper({ question: "Want similar pieces in your size?", choices: ["Yes", "Try another size", "Skip"] }).',
+  find_similar: (r) => r.products?.length
+    ? `One line on the closest match, then offer: ask_shopper({ question: "Open one?", choices: ${JSON.stringify(r.nextStepChoices ?? ['Show me more', 'A different style'])} }) — a tap opens it (get_product).`
+    : `Nothing similar passed. Offer: ask_shopper({ question: "Widen the search?", choices: ["Any price", "Any size", "A different style"] }).`,
+  check_size_availability: (r, a) => r.error
+    ? `No size known. Ask in the store: ask_shopper({ question: "Which size are you?", choices: ${JSON.stringify((r.sizeLabels ?? []).slice(0, 5).length >= 2 ? r.sizeLabels.slice(0, 5) : ['S', 'M', 'L', 'XL'])}, product_id: ${a?.product_id ?? r.productId} }), then set_my_sizes so it sticks.`
+    : r.inStockAnywhere
+      ? 'Offer: ask_shopper({ question: "Add it to the bag in that size?", choices: ["Yes", "Show similar first", "Not now"] }).'
+      : 'Not in that size — offer: ask_shopper({ question: "Want similar pieces in your size?", choices: ["Yes", "Try another size", "Skip"] }).',
+  remove_from_cart: (r) => r.code === 'HUMAN_ADDED_LINE' ? 'Ask first: ask_shopper({ question: "Remove it from your bag?", choices: ["Yes, remove it", "Keep it"] }) — then pass the cart_id.' : null,
   view_cart: (r) => r.count ? 'Checkout stays with the human — point to the links. Offer: ask_shopper({ question: "Anything else?", choices: ["Find cheaper similar", "Remove something", "I’m done"] }).' : null,
 };
 
@@ -856,7 +1017,7 @@ export async function executeTool(name, args, channel = 'unknown') {
       // Agents always see where the human is and what they did since the
       // agent's last call — no need to ask. (get_shopper_signals is the
       // long form; the web channel is the human, who can see the screen.)
-      if (channel !== 'web' && name !== 'get_shopper_signals' && result && typeof result === 'object' && !Array.isArray(result)) {
+      if (channel !== 'web' && result && typeof result === 'object' && !Array.isArray(result)) {
         result.shopper = { ...shopperContext(channel), sizes: readProfile() };
         const next = NEXT_STEP[name]?.(result, parsed);
         if (next) result.nextStep = next;

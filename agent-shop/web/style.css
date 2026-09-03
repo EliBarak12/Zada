@@ -137,6 +137,8 @@ main { flex: 1; display: flex; min-height: 0; }
 .size[data-a="out_of_stock"], .size[data-a="coming_soon"] { color: #c4c4c4; text-decoration: line-through; }
 .size.yours { outline: 2px solid var(--accent); outline-offset: -1px; }
 .size.yours::after { content: 'YOURS'; position: absolute; top: -7px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #fff; font-size: 7px; letter-spacing: 0.12em; padding: 1px 4px; }
+.size.checked { outline: 2px solid var(--ink); outline-offset: -1px; }
+.size.checked::after { content: 'CHECKED'; position: absolute; top: -7px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; font-size: 7px; letter-spacing: 0.12em; padding: 1px 4px; }
 .size-legend { margin-top: 12px; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
 .size.selectable { cursor: pointer; }
 .size.selected { background: var(--ink); color: var(--paper); border-color: var(--ink); }
@@ -213,6 +215,9 @@ main { flex: 1; display: flex; min-height: 0; }
 .q-free::placeholder { color: #888; }
 
 /* ---------------------------------------------- the agent writes, in the store */
+.detail-info .panel.agent-note { min-width: 0; max-width: 400px; padding: 22px 0 0; margin-top: 22px; border-top: 1px solid var(--hairline); }
+.detail-info .panel.agent-note h3 { font-size: 10px; }
+.detail-info .panel.agent-note .review { font-size: 10.5px; }
 .panel.agent-note h3 { color: var(--agent); }
 .panel.agent-note .price-verdict { border-color: var(--agent); }
 .panel.agent-note .price-verdict.good { color: var(--ink); }

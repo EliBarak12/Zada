@@ -31,7 +31,8 @@ export function buildMcpServer() {
       'The human decides by tapping in the store, not by typing: after search results, a product view, a size check or the bag, offer the next step with ask_shopper (2-5 short choices) — results include a ready-made nextStep suggestion. Never ask in chat what you can ask in the store. ' +
       'Every tool result carries `shopper`: where the human is on screen right now, what they did since your last call, and their saved sizes — acknowledge it and build on it; get_shopper_signals is the long form (journey, loves, dwell, taste, answers). ' +
       'Catalog is in English (translate the human’s words before searching; reply in their language); prices in ILS (₪); men’s trousers are EU 36-50 or S-XL and the store converts US waists. ' +
-      'Lookups (size, price, reviews, verdicts) on a product the human is NOT looking at stay quiet and say humanSees / onScreen:false; only get_product, search_products, find_similar and view_cart change the screen.' },
+      'Lookups (size, price, reviews, verdicts) on a product the human is NOT looking at stay quiet and say humanSees / onScreen:false; only get_product, search_products, find_similar and view_cart change the screen. ' +
+      'search_products filters and sorts run over the whole category (page with offset / nextOffset); ids from search rows are colourway ids — add_to_cart with one takes that colour; remove_from_cart by product_id only removes lines an agent added.' },
   );
   for (const t of TOOLS) {
     server.registerTool(

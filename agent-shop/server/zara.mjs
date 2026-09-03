@@ -315,9 +315,14 @@ function scoreCategory(cat, terms) {
 
 const pathDepth = (c) => (c.path.match(/>/g) ?? []).length;
 
+// Category nodes that are not product listings (editorial, help, campaigns).
+const NON_PRODUCT = /GIFT CARD|STORES|DOWNLOAD|NEWSLETTER|CONTACT|PRESS|COMPANY|OFFICES|HELP|JOIN LIFE|ABOUT|EDITORIAL|STORE LOCATOR|PROCESS|POSTURES|INFO/i;
+
 export async function searchProducts(query, { section, limit = 24 } = {}) {
   const { section: sec, terms } = parseQuery(query, section);
-  const cats = await flatCategories(sec);
+  const all = await flatCategories(sec);
+  const listing = all.filter((c) => !NON_PRODUCT.test(c.path));
+  const cats = listing.length ? listing : all;
 
   const seenCat = new Set();
   const ranked = cats
